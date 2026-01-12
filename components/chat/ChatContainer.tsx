@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import MessageList from "./MessageList";
@@ -12,6 +12,7 @@ import type { Step } from "@/types";
 
 export default function ChatContainer() {
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const chatContentRef = useRef<HTMLDivElement>(null);
   
   // Get real-time step from Convex
   const executionState = useQuery(
@@ -24,13 +25,38 @@ export default function ChatContainer() {
     conversationId ? { conversationId: conversationId as any } : "skip"
   );
 
+  const researchResults = useQuery(
+    api.queries.getResearchResults,
+    conversationId ? { conversationId: conversationId as any } : "skip"
+  );
+
   const currentStep = useMemo(
     () => executionState?.step || conversation?.status || "idle",
     [executionState?.step, conversation?.status]
   );
 
+  // Auto-scroll to bottom when content updates
+  useEffect(() => {
+    if (chatContentRef.current) {
+      const scrollContainer = chatContentRef.current;
+      scrollContainer.scrollTo({
+        top: scrollContainer.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [
+    executionState?.state?.messages,
+    conversation?.userQuery,
+    executionState?.step,
+    researchResults?.trends,
+  ]);
+
   const handleNewConversation = useCallback((id: string) => {
     setConversationId(id);
+    // Scroll to top when starting a new conversation
+    if (chatContentRef.current) {
+      chatContentRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }, []);
 
   const executionStateForStepIndicator = useMemo(
@@ -53,7 +79,7 @@ export default function ChatContainer() {
           />
         </div>
         
-        <div className={styles.chatContent}>
+        <div className={styles.chatContent} ref={chatContentRef}>
           <MessageList conversationId={conversationId} />
         </div>
         
