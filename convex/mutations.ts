@@ -294,3 +294,73 @@ export const saveExecutionState = mutation({
   },
 });
 
+export const saveResearchCache = mutation({
+  args: {
+    queryHash: v.string(),
+    query: v.string(),
+    timeWindow: v.string(),
+    domain: v.string(),
+    trends: v.array(
+      v.object({
+        title: v.string(),
+        summary: v.string(),
+        whyItMatters: v.string(),
+        sources: v.array(
+          v.object({
+            url: v.string(),
+            timestamp: v.optional(v.string()),
+            snippet: v.optional(v.string()),
+          })
+        ),
+        confidence: v.number(),
+      })
+    ),
+    cacheTTL: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const expiresAt = now + args.cacheTTL;
+    
+    // Check if cache entry already exists
+    const existing = await ctx.db
+      .query("researchCache")
+      .withIndex("queryHash", (q) =>
+        q.eq("queryHash", args.queryHash)
+      )
+      .first();
+    
+    if (existing) {
+      // Update existing cache entry
+      await ctx.db.patch(existing._id, {
+        trends: args.trends,
+        cacheTTL: args.cacheTTL,
+        createdAt: now,
+        expiresAt: expiresAt,
+      });
+    } else {
+      // Insert new cache entry
+      await ctx.db.insert("researchCache", {
+        queryHash: args.queryHash,
+        query: args.query,
+        timeWindow: args.timeWindow,
+        domain: args.domain,
+        trends: args.trends,
+        cacheTTL: args.cacheTTL,
+        createdAt: now,
+        expiresAt: expiresAt,
+      });
+    }
+    
+    // Clean up expired cache entries (optional, can be done periodically)
+    // This is a simple cleanup - in production, you might want a scheduled function
+    const expiredEntries = await ctx.db
+      .query("researchCache")
+      .withIndex("expiresAt", (q) => q.lt("expiresAt", now))
+      .collect();
+    
+    for (const entry of expiredEntries) {
+      await ctx.db.delete(entry._id);
+    }
+  },
+});
+

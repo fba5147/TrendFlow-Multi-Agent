@@ -108,5 +108,33 @@ export default defineSchema({
     error: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("conversationId", ["conversationId"]),
+
+  // Research cache for prompt-based caching
+  researchCache: defineTable({
+    queryHash: v.string(), // Hash of normalized query + timeWindow + domain
+    query: v.string(), // Original query
+    timeWindow: v.string(),
+    domain: v.string(),
+    trends: v.array(
+      v.object({
+        title: v.string(),
+        summary: v.string(),
+        whyItMatters: v.string(),
+        sources: v.array(
+          v.object({
+            url: v.string(),
+            timestamp: v.optional(v.string()),
+            snippet: v.optional(v.string()),
+          })
+        ),
+        confidence: v.number(),
+      })
+    ),
+    cacheTTL: v.number(), // Cache TTL in milliseconds
+    createdAt: v.number(),
+    expiresAt: v.number(), // createdAt + cacheTTL
+  })
+    .index("queryHash", ["queryHash"])
+    .index("expiresAt", ["expiresAt"]),
 });
 

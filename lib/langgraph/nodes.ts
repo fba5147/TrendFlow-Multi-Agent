@@ -366,9 +366,10 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
       
       try {
         const trends = await fetchTrendsIncremental(
-          currentQuery, 
+          currentQuery,
           scope.timeWindow,
-          undefined // Don't use incremental callback, we'll batch send after each search
+          onTrendFound,
+          scope.domain
         );
         
         if (trends && trends.length > 0) {

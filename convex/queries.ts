@@ -56,3 +56,33 @@ export const getExecutionState = query({
   },
 });
 
+export const getCachedResearch = query({
+  args: { 
+    queryHash: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    
+    // Find cache entry by query hash
+    const cacheEntry = await ctx.db
+      .query("researchCache")
+      .withIndex("queryHash", (q) =>
+        q.eq("queryHash", args.queryHash)
+      )
+      .first();
+    
+    // Check if cache is still valid (not expired)
+    if (cacheEntry && cacheEntry.expiresAt > now) {
+      return {
+        trends: cacheEntry.trends,
+        cached: true,
+        age: now - cacheEntry.createdAt,
+        expiresAt: cacheEntry.expiresAt,
+      };
+    }
+    
+    // Cache expired or not found
+    return null;
+  },
+});
+
