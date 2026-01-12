@@ -90,8 +90,6 @@ async function callMCPTool(toolName: string, args: Record<string, any>): Promise
       arguments: args,
     });
 
-    console.log(`[MCP] Result: ${JSON.stringify(result)}`);
-
     if (result.isError) {
       throw new Error(`MCP tool error: ${JSON.stringify(result)}`);
     }
