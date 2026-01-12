@@ -102,6 +102,97 @@ async function callMCPTool(toolName: string, args: Record<string, any>): Promise
 }
 
 /**
+ * Convert timeWindow string to Brave API freshness parameter
+ * 
+ * Brave API freshness values:
+ * - pd: last 24 hours
+ * - pw: last 7 days
+ * - pm: last 31 days
+ * - py: last 365 days
+ * - YYYY-MM-DDtoYYYY-MM-DD: custom date range
+ */
+function convertTimeWindowToFreshness(timeWindow: string): string | undefined {
+  if (!timeWindow) return undefined;
+  
+  const timeWindowLower = timeWindow.toLowerCase().trim();
+  const now = new Date();
+  
+  // Exact matches for common time windows
+  if (timeWindowLower.includes("today") || timeWindowLower.includes("last 24 hours") || 
+      timeWindowLower === "now" || timeWindowLower.includes("past day")) {
+    return "pd";
+  }
+  
+  if (timeWindowLower.includes("this week") || timeWindowLower.includes("last week") || 
+      timeWindowLower.includes("past week") || timeWindowLower.includes("7 days") ||
+      timeWindowLower.includes("past 7 days")) {
+    return "pw";
+  }
+  
+  if (timeWindowLower.includes("this month") || timeWindowLower.includes("last month") || 
+      timeWindowLower.includes("past month") || timeWindowLower.includes("30 days") ||
+      timeWindowLower.includes("31 days") || timeWindowLower.includes("past 30 days")) {
+    return "pm";
+  }
+  
+  if (timeWindowLower.includes("this year") || timeWindowLower.includes("last year") || 
+      timeWindowLower.includes("past year") || timeWindowLower.includes("365 days")) {
+    return "py";
+  }
+  
+  // Try to parse specific date ranges
+  // Format: "YYYY-MM-DD to YYYY-MM-DD" or "YYYY-MM-DD - YYYY-MM-DD"
+  const dateRangeMatch = timeWindowLower.match(/(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})/);
+  if (dateRangeMatch) {
+    const startDate = dateRangeMatch[1];
+    const endDate = dateRangeMatch[2];
+    // Brave API format: YYYY-MM-DDtoYYYY-MM-DD (no spaces, "to" in lowercase)
+    return `${startDate}to${endDate}`;
+  }
+  
+  // Try to parse quarters (Q1 2024, Q2 2024, etc.)
+  const quarterMatch = timeWindowLower.match(/\bq([1-4])\s*(\d{4})/i);
+  if (quarterMatch) {
+    const quarter = parseInt(quarterMatch[1]);
+    const year = parseInt(quarterMatch[2]);
+    const startMonth = (quarter - 1) * 3 + 1;
+    const endMonth = quarter * 3;
+    const startDate = `${year}-${String(startMonth).padStart(2, '0')}-01`;
+    const endDate = `${year}-${String(endMonth).padStart(2, '0')}-${new Date(year, endMonth, 0).getDate()}`;
+    return `${startDate}to${endDate}`;
+  }
+  
+  // Try to parse specific months (January 2024, Jan 2024, etc.)
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                      'july', 'august', 'september', 'october', 'november', 'december'];
+  const monthAbbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
+                     'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const monthMatch = timeWindowLower.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{4})/i);
+  if (monthMatch) {
+    const monthName = monthMatch[1].toLowerCase();
+    const year = parseInt(monthMatch[2]);
+    let monthIndex = monthNames.indexOf(monthName);
+    if (monthIndex === -1) {
+      monthIndex = monthAbbr.indexOf(monthName);
+    }
+    if (monthIndex !== -1) {
+      const startDate = `${year}-${String(monthIndex + 1).padStart(2, '0')}-01`;
+      const endDate = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${new Date(year, monthIndex + 1, 0).getDate()}`;
+      return `${startDate}to${endDate}`;
+    }
+  }
+  
+  // For "recent" or "latest" queries, default to past week
+  if (timeWindowLower.includes("recent") || timeWindowLower.includes("latest")) {
+    return "pw";
+  }
+  
+  // Default: no freshness filter (return all results)
+  // This allows the API to return results from any time period
+  return undefined;
+}
+
+/**
  * Search using MCP tools
  * 
  * Tries common MCP search tool names:
@@ -112,7 +203,7 @@ async function callMCPTool(toolName: string, args: Record<string, any>): Promise
  * 
  * Yields results incrementally as they're parsed
  */
-async function* searchWithMCP(query: string, maxResults: number = 10): AsyncGenerator<SearchResult, void, unknown> {
+async function* searchWithMCP(query: string, maxResults: number = 10, timeWindow?: string): AsyncGenerator<SearchResult, void, unknown> {
   if (!mcpClient) {
     throw new Error("MCP client not available");
   }
@@ -141,12 +232,24 @@ async function* searchWithMCP(query: string, maxResults: number = 10): AsyncGene
 
   console.log(`[MCP] Using tool: ${searchTool}`);
 
-  // Call the search tool
-  const result = await callMCPTool(searchTool, {
+  // Convert timeWindow to Brave API freshness parameter
+  const freshness = timeWindow ? convertTimeWindowToFreshness(timeWindow) : undefined;
+  
+  // Build search arguments
+  const searchArgs: Record<string, any> = {
     query,
     count: maxResults,
     ...(process.env.BRAVE_API_KEY && { api_key: process.env.BRAVE_API_KEY }),
-  });
+  };
+  
+  // Add freshness parameter if available (Brave API specific)
+  if (freshness) {
+    searchArgs.freshness = freshness;
+    console.log(`[MCP] Using freshness filter: ${freshness} (from timeWindow: "${timeWindow}")`);
+  }
+
+  // Call the search tool
+  const result = await callMCPTool(searchTool, searchArgs);
 
   // Parse results based on tool response format and yield incrementally
   let resultCount = 0;
@@ -157,9 +260,86 @@ async function* searchWithMCP(query: string, maxResults: number = 10): AsyncGene
       try {
         const data = JSON.parse(content.text);
         
-        // Handle different response formats
-        if (data.results && Array.isArray(data.results)) {
-          // Brave Search format - try multiple timestamp fields
+        // Handle Brave API response structure (primary format)
+        // Brave API returns: { web: { results: [...] }, news: { results: [...] }, ... }
+        // NOTE: No AI needed here - this is structured data parsing. AI is used for:
+        // - Research planning (extracting timeWindow, domain from user query)
+        // - Trend synthesis (ranking, enhancing summaries, generating "why it matters")
+        // - Content generation (creating platform-specific ideas)
+        if (data.web && Array.isArray(data.web.results)) {
+          // Brave API web results - use direct field access (no AI needed for structured data)
+          for (const item of data.web.results) {
+            if (resultCount >= maxResults) return;
+            
+            // Use fetched_content_timestamp (numeric) as primary source, convert to ISO string
+            let timestamp: string | undefined;
+            if (item.fetched_content_timestamp) {
+              // Convert numeric timestamp (seconds or milliseconds) to ISO string
+              const ts = typeof item.fetched_content_timestamp === 'number' 
+                ? item.fetched_content_timestamp 
+                : parseInt(item.fetched_content_timestamp);
+              // Check if it's in seconds (10 digits) or milliseconds (13 digits)
+              const date = ts < 10000000000 
+                ? new Date(ts * 1000)  // seconds
+                : new Date(ts);        // milliseconds
+              if (!isNaN(date.getTime())) {
+                timestamp = date.toISOString();
+              }
+            }
+            // Fallback to page_fetched (string) if available
+            if (!timestamp && item.page_fetched) {
+              const date = new Date(item.page_fetched);
+              if (!isNaN(date.getTime())) {
+                timestamp = date.toISOString();
+              }
+            }
+            // Last fallback: page_age (string like "2 days ago") - we'll parse this later if needed
+            
+            yield {
+              url: item.url || "",
+              title: item.title || "",
+              snippet: item.description || "",
+              timestamp: timestamp,
+            };
+            resultCount++;
+          }
+        }
+        
+        // Handle Brave API news results
+        if (data.news && Array.isArray(data.news.results) && resultCount < maxResults) {
+          for (const item of data.news.results) {
+            if (resultCount >= maxResults) return;
+            
+            let timestamp: string | undefined;
+            if (item.fetched_content_timestamp) {
+              const ts = typeof item.fetched_content_timestamp === 'number' 
+                ? item.fetched_content_timestamp 
+                : parseInt(item.fetched_content_timestamp);
+              const date = ts < 10000000000 ? new Date(ts * 1000) : new Date(ts);
+              if (!isNaN(date.getTime())) {
+                timestamp = date.toISOString();
+              }
+            }
+            if (!timestamp && item.page_fetched) {
+              const date = new Date(item.page_fetched);
+              if (!isNaN(date.getTime())) {
+                timestamp = date.toISOString();
+              }
+            }
+            
+            yield {
+              url: item.url || "",
+              title: item.title || "",
+              snippet: item.description || "",
+              timestamp: timestamp,
+            };
+            resultCount++;
+          }
+        }
+        
+        // Fallback: Handle generic results array (for other search APIs)
+        if (data.results && Array.isArray(data.results) && resultCount < maxResults) {
+          // Generic format - try multiple timestamp fields
           for (const item of data.results) {
             if (resultCount >= maxResults) return;
             // Try multiple possible timestamp field names from website
@@ -168,12 +348,13 @@ async function* searchWithMCP(query: string, maxResults: number = 10): AsyncGene
                             item.date || 
                             item.timestamp ||
                             item.publish_date ||
-                            item.published_time;
+                            item.published_time ||
+                            item.fetched_content_timestamp;
             yield {
               url: item.url || item.link || "",
               title: item.title || "",
               snippet: item.description || item.snippet || "",
-              timestamp: timestamp, // Website timestamp (from Brave Search API)
+              timestamp: timestamp,
             };
             resultCount++;
           }
@@ -433,14 +614,74 @@ export async function fetchTrendsIncremental(
         const similarity = cachedResult.similarity ? ` (${Math.round(cachedResult.similarity)}% similar)` : "";
         console.log(`[MCP] ✓ Cache hit! Using cached results (${matchType}${similarity}, age: ${Math.round(cachedResult.age / 1000 / 60)} minutes)`);
         
-        // Call onTrendFound for each cached trend to maintain streaming behavior
-        if (onTrendFound) {
-          for (let i = 0; i < cachedResult.trends.length; i++) {
-            await onTrendFound(cachedResult.trends[i], cachedResult.trends.slice(0, i + 1));
+        // CRITICAL: Filter cached results by timestamp to ensure they're still within the timeWindow
+        // This is important because time-sensitive queries (e.g., "this week") may have cached results
+        // that are now outside the requested timeframe
+        const filteredTrends = cachedResult.trends.filter((trend: any) => {
+          // Check each source's timestamp
+          if (!trend.sources || trend.sources.length === 0) {
+            return false; // Skip trends without sources
           }
-        }
+          
+          // Use the first source's timestamp (trends typically have one source)
+          const sourceTimestamp = trend.sources[0]?.timestamp;
+          if (!sourceTimestamp) {
+            // If no timestamp, we can't validate - exclude it to be safe
+            console.log(`[MCP] ✗ Filtering cached trend without timestamp: ${trend.title?.substring(0, 60)}...`);
+            return false;
+          }
+          
+          const isWithinWindow = isTimestampInTimeWindow(sourceTimestamp, timeWindow);
+          if (!isWithinWindow) {
+            console.log(`[MCP] ✗ Filtering cached trend outside timeWindow "${timeWindow}": ${trend.title?.substring(0, 60)}... (timestamp: ${sourceTimestamp})`);
+          }
+          return isWithinWindow;
+        });
         
-        return cachedResult.trends;
+        // FALLBACK: If no cached results within timeWindow, use most recent cached data
+        if (filteredTrends.length === 0 && cachedResult.trends.length > 0) {
+          console.log(`[MCP] ⚠ No cached results within timeWindow "${timeWindow}", using most recent cached data as fallback`);
+          
+          // Sort all cached trends by timestamp (most recent first)
+          const sortedCachedTrends = cachedResult.trends.sort((a: any, b: any) => {
+            const timestampA = a.sources?.[0]?.timestamp;
+            const timestampB = b.sources?.[0]?.timestamp;
+            if (!timestampA) return 1;
+            if (!timestampB) return -1;
+            return new Date(timestampB).getTime() - new Date(timestampA).getTime();
+          });
+          
+          // Take the most recent trends (up to 10)
+          const mostRecentCached = sortedCachedTrends.slice(0, 10);
+          
+          console.log(`[MCP] ✓ Using ${mostRecentCached.length} most recent cached trend(s) as fallback`);
+          
+          // Call onTrendFound for fallback cached trends
+          if (onTrendFound) {
+            for (let i = 0; i < mostRecentCached.length; i++) {
+              await onTrendFound(mostRecentCached[i], mostRecentCached.slice(0, i + 1));
+            }
+          }
+          
+          return mostRecentCached;
+        } else if (filteredTrends.length === 0) {
+          console.log(`[MCP] All cached results filtered out (outside timeWindow "${timeWindow}"), fetching fresh data`);
+          // Continue to fetch fresh data
+        } else {
+          const filteredCount = cachedResult.trends.length - filteredTrends.length;
+          if (filteredCount > 0) {
+            console.log(`[MCP] Filtered ${filteredCount} cached trend(s) outside timeWindow "${timeWindow}", using ${filteredTrends.length} valid trend(s)`);
+          }
+          
+          // Call onTrendFound for each filtered cached trend to maintain streaming behavior
+          if (onTrendFound) {
+            for (let i = 0; i < filteredTrends.length; i++) {
+              await onTrendFound(filteredTrends[i], filteredTrends.slice(0, i + 1));
+            }
+          }
+          
+          return filteredTrends;
+        }
       } else {
         console.log(`[MCP] Cache miss - fetching fresh data`);
       }
@@ -462,9 +703,11 @@ export async function fetchTrendsIncremental(
   // Convert search results to trend format incrementally
   // Enhanced processing with better filtering and quality checks
   const trends: any[] = [];
+  const allTrends: any[] = []; // Store all trends (including outside timeWindow) for fallback
   let hasResults = false;
   
-  for await (const result of searchWithMCP(query, 10)) {
+  // Pass timeWindow to search function so it can filter by timeframe
+  for await (const result of searchWithMCP(query, 10, timeWindow)) {
     hasResults = true;
     
     // Process and yield trend immediately as we get each result
@@ -504,26 +747,23 @@ export async function fetchTrendsIncremental(
       cleanTitle
     );
     
+    // Skip if we can't determine timestamp
+    if (!normalizedTimestamp) {
+      console.warn(`[MCP] ⚠ No timestamp available for result, skipping: ${cleanTitle.substring(0, 60)}...`);
+      continue;
+    }
+    
     // Log timestamp source for transparency
-    // Check if we actually used the website timestamp (it was valid) vs. fallback
     let usedWebsiteTimestamp = false;
     if (originalTimestamp && normalizedTimestamp) {
       try {
         const originalDate = new Date(originalTimestamp);
         const normalizedDate = new Date(normalizedTimestamp);
-        // If dates are the same (within 1 second tolerance), we used the website timestamp
         usedWebsiteTimestamp = !isNaN(originalDate.getTime()) && 
                               Math.abs(originalDate.getTime() - normalizedDate.getTime()) < 1000;
       } catch (e) {
-        // Invalid timestamp, so we used fallback
         usedWebsiteTimestamp = false;
       }
-    }
-    
-    if (usedWebsiteTimestamp) {
-      console.log(`[MCP] ✓ Using website timestamp: ${normalizedTimestamp} (from ${result.url})`);
-    } else {
-      console.log(`[MCP] ⚠ No valid website timestamp available, using timeWindow-based estimate: ${normalizedTimestamp} (for ${result.url}, timeWindow: ${timeWindow})`);
     }
     
     const trend = {
@@ -533,21 +773,33 @@ export async function fetchTrendsIncremental(
       sources: [
         {
           url: result.url,
-          timestamp: normalizedTimestamp, // Use normalized timestamp (from website or timeWindow)
+          timestamp: normalizedTimestamp,
           snippet: cleanSnippet.substring(0, 150),
         },
       ],
       confidence: confidence,
     };
     
-    // Print confidence score for each source
-    console.log(`[MCP] Source confidence: ${(confidence * 100).toFixed(1)}% | Title: "${cleanTitle.substring(0, 60)}${cleanTitle.length > 60 ? '...' : ''}" | URL: ${result.url}`);
+    // Store all trends (for fallback if none match timeWindow)
+    allTrends.push(trend);
     
-    trends.push(trend);
+    // Check if within timeWindow
+    const isWithinWindow = isTimestampInTimeWindow(normalizedTimestamp, timeWindow);
     
-    // Call callback incrementally if provided
-    if (onTrendFound) {
-      await onTrendFound(trend, [...trends]);
+    if (isWithinWindow) {
+      console.log(`[MCP] ✓ Result within timeWindow "${timeWindow}": ${cleanTitle.substring(0, 60)}... (timestamp: ${normalizedTimestamp})`);
+      if (usedWebsiteTimestamp) {
+        console.log(`[MCP] ✓ Using website timestamp: ${normalizedTimestamp} (from ${result.url})`);
+      }
+      
+      trends.push(trend);
+      
+      // Call callback incrementally if provided
+      if (onTrendFound) {
+        await onTrendFound(trend, [...trends]);
+      }
+    } else {
+      console.log(`[MCP] ✗ Result outside timeWindow "${timeWindow}": ${cleanTitle.substring(0, 60)}... (timestamp: ${normalizedTimestamp}) - storing for fallback`);
     }
   }
   
@@ -555,31 +807,92 @@ export async function fetchTrendsIncremental(
     throw new Error("No search results returned from MCP server");
   }
   
-  console.log(`[MCP] Converted ${trends.length} valid trend(s) from search results`);
+  // FALLBACK: If no results within timeWindow, use most recent data
+  let finalTrends = trends;
+  if (trends.length === 0 && allTrends.length > 0) {
+    console.log(`[MCP] ⚠ No results found within timeWindow "${timeWindow}", using most recent data as fallback`);
+    
+    // Sort all trends by timestamp (most recent first)
+    const sortedTrends = allTrends.sort((a, b) => {
+      const timestampA = a.sources?.[0]?.timestamp;
+      const timestampB = b.sources?.[0]?.timestamp;
+      if (!timestampA) return 1; // Put items without timestamp at end
+      if (!timestampB) return -1;
+      return new Date(timestampB).getTime() - new Date(timestampA).getTime();
+    });
+    
+    // Take the most recent trends (up to 10)
+    finalTrends = sortedTrends.slice(0, 10);
+    
+    console.log(`[MCP] ✓ Using ${finalTrends.length} most recent trend(s) as fallback (oldest: ${finalTrends[finalTrends.length - 1]?.sources?.[0]?.timestamp || 'unknown'})`);
+    
+    // Call callback for fallback trends
+    if (onTrendFound) {
+      for (let i = 0; i < finalTrends.length; i++) {
+        await onTrendFound(finalTrends[i], finalTrends.slice(0, i + 1));
+      }
+    }
+  } else {
+    console.log(`[MCP] Converted ${trends.length} valid trend(s) from search results (all within timeWindow: "${timeWindow}")`);
+  }
   
   // Store in cache for future use
-  if (convex && trends.length > 0) {
+  // NOTE: Cache trends within timeWindow, but also cache most recent trends for fallback
+  const trendsToCache = finalTrends.length > 0 ? finalTrends : (allTrends.length > 0 ? allTrends.slice(0, 10) : []);
+  
+  if (convex && trendsToCache.length > 0) {
     try {
       const queryHash = generateQueryHash(query, timeWindow, domain);
       const cacheTTL = determineCacheTTL(query, timeWindow);
       
-      await convex.mutation(api.mutations.saveResearchCache, {
-        queryHash,
-        query,
-        timeWindow,
-        domain: domain || query,
-        trends,
-        cacheTTL,
+      // Filter out trends without timestamps before caching
+      const validTrendsToCache = trendsToCache.filter((trend: any) => {
+        const sourceTimestamp = trend.sources?.[0]?.timestamp;
+        if (!sourceTimestamp) {
+          console.warn(`[MCP] ⚠ Skipping caching trend without timestamp: ${trend.title?.substring(0, 60)}...`);
+          return false;
+        }
+        return true;
       });
       
-      console.log(`[MCP] ✓ Cached ${trends.length} trend(s) with TTL: ${Math.round(cacheTTL / 1000 / 60)} minutes`);
+      if (validTrendsToCache.length > 0) {
+        // Sort by timestamp (most recent first) before caching
+        const sortedForCache = validTrendsToCache.sort((a: any, b: any) => {
+          const timestampA = a.sources?.[0]?.timestamp;
+          const timestampB = b.sources?.[0]?.timestamp;
+          if (!timestampA) return 1;
+          if (!timestampB) return -1;
+          return new Date(timestampB).getTime() - new Date(timestampA).getTime();
+        });
+        
+        await convex.mutation(api.mutations.saveResearchCache, {
+          queryHash,
+          query,
+          timeWindow,
+          domain: domain || query,
+          trends: sortedForCache, // Cache trends (within timeWindow or most recent as fallback)
+          cacheTTL,
+        });
+        
+        const withinWindowCount = sortedForCache.filter((t: any) => 
+          isTimestampInTimeWindow(t.sources?.[0]?.timestamp, timeWindow)
+        ).length;
+        
+        if (withinWindowCount === sortedForCache.length) {
+          console.log(`[MCP] ✓ Cached ${sortedForCache.length} trend(s) (all within timeWindow: "${timeWindow}") with TTL: ${Math.round(cacheTTL / 1000 / 60)} minutes`);
+        } else {
+          console.log(`[MCP] ✓ Cached ${sortedForCache.length} trend(s) (${withinWindowCount} within timeWindow, ${sortedForCache.length - withinWindowCount} as fallback) with TTL: ${Math.round(cacheTTL / 1000 / 60)} minutes`);
+        }
+      } else {
+        console.warn(`[MCP] ⚠ No trends to cache (all were missing timestamps)`);
+      }
     } catch (error) {
       console.warn(`[MCP] Failed to cache results:`, error);
       // Don't throw - caching is best effort
     }
   }
   
-  return trends;
+  return finalTrends;
 }
 
 
@@ -915,6 +1228,106 @@ async function fetchTimestampFromMCP(url: string): Promise<string | undefined> {
   }
   
   return undefined;
+}
+
+/**
+ * Check if a timestamp falls within the specified timeWindow
+ * Returns true if the timestamp is within the timeframe, false otherwise
+ */
+function isTimestampInTimeWindow(timestamp: string | undefined, timeWindow: string): boolean {
+  if (!timestamp) return false;
+  
+  try {
+    const resultDate = new Date(timestamp);
+    if (isNaN(resultDate.getTime())) return false;
+    
+    const now = new Date();
+    const timeWindowLower = timeWindow.toLowerCase().trim();
+    
+    // Calculate time difference in milliseconds
+    const timeDiff = now.getTime() - resultDate.getTime();
+    const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
+    
+    // Check based on timeWindow
+    if (timeWindowLower.includes("today") || timeWindowLower === "now" || timeWindowLower.includes("last 24 hours")) {
+      return daysDiff <= 1; // Within last 24 hours
+    }
+    
+    if (timeWindowLower.includes("this week") || timeWindowLower.includes("last week") || 
+        timeWindowLower.includes("past week") || timeWindowLower.includes("7 days")) {
+      return daysDiff <= 7; // Within last 7 days
+    }
+    
+    if (timeWindowLower.includes("this month") || timeWindowLower.includes("last month") || 
+        timeWindowLower.includes("past month") || timeWindowLower.includes("30 days") ||
+        timeWindowLower.includes("31 days")) {
+      return daysDiff <= 31; // Within last 31 days
+    }
+    
+    if (timeWindowLower.includes("this year") || timeWindowLower.includes("last year") || 
+        timeWindowLower.includes("past year") || timeWindowLower.includes("365 days")) {
+      return daysDiff <= 365; // Within last 365 days
+    }
+    
+    if (timeWindowLower.includes("recent") || timeWindowLower.includes("latest")) {
+      return daysDiff <= 30; // Recent = within last 30 days
+    }
+    
+    // Handle specific date ranges (YYYY-MM-DD to YYYY-MM-DD)
+    const dateRangeMatch = timeWindowLower.match(/(\d{4}-\d{2}-\d{2})\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2})/);
+    if (dateRangeMatch) {
+      const startDate = new Date(dateRangeMatch[1]);
+      const endDate = new Date(dateRangeMatch[2]);
+      return resultDate >= startDate && resultDate <= endDate;
+    }
+    
+    // Handle quarters (Q1 2024, Q2 2024, etc.)
+    const quarterMatch = timeWindowLower.match(/\bq([1-4])\s*(\d{4})/i);
+    if (quarterMatch) {
+      const quarter = parseInt(quarterMatch[1]);
+      const year = parseInt(quarterMatch[2]);
+      const startMonth = (quarter - 1) * 3;
+      const endMonth = quarter * 3;
+      const startDate = new Date(year, startMonth, 1);
+      const endDate = new Date(year, endMonth, 0, 23, 59, 59, 999); // Last day of quarter
+      return resultDate >= startDate && resultDate <= endDate;
+    }
+    
+    // Handle specific months (January 2024, Jan 2024, etc.)
+    const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                        'july', 'august', 'september', 'october', 'november', 'december'];
+    const monthAbbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
+                       'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const monthMatch = timeWindowLower.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{4})/i);
+    if (monthMatch) {
+      const monthName = monthMatch[1].toLowerCase();
+      const year = parseInt(monthMatch[2]);
+      let monthIndex = monthNames.indexOf(monthName);
+      if (monthIndex === -1) {
+        monthIndex = monthAbbr.indexOf(monthName);
+      }
+      if (monthIndex !== -1) {
+        const startDate = new Date(year, monthIndex, 1);
+        const endDate = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999); // Last day of month
+        return resultDate >= startDate && resultDate <= endDate;
+      }
+    }
+    
+    // Handle year-only (2024)
+    const yearMatch = timeWindowLower.match(/\b(\d{4})\b/);
+    if (yearMatch && !quarterMatch && !monthMatch) {
+      const year = parseInt(yearMatch[1]);
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31, 23, 59, 59, 999);
+      return resultDate >= startDate && resultDate <= endDate;
+    }
+    
+    // Default: if we can't determine, allow it (better to include than exclude)
+    return true;
+  } catch (e) {
+    console.warn(`[MCP] Error checking timestamp against timeWindow: ${e}`);
+    return true; // If we can't validate, include it
+  }
 }
 
 /**

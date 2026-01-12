@@ -114,7 +114,7 @@ export default function ResearchDisplay({ trends }: ResearchDisplayProps) {
           
           <div className={styles.sourcesSection}>
             <div className={styles.sourcesHeader}>
-              <p className={styles.sourcesLabel}>Citations ({trend.sources.length})</p>
+              <p className={styles.sourcesLabel}>Citation:</p>
               <span className={styles.sourcesHint}>Click to view source</span>
             </div>
             <ul className={styles.sourcesList}>
