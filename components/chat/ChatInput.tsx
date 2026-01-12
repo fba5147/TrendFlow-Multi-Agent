@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import styles from "./chat.module.css";
@@ -19,6 +19,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
   const [query, setQuery] = useState("");
   const [persona, setPersona] = useState<string>(DEFAULT_PERSONAS[0]);
   const [isLoading, setIsLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
   const createConversation = useMutation(api.mutations.createConversation);
 
   const handlePersonaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -27,8 +28,15 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || isLoading) return;
+    e.stopPropagation();
+    
+    // Use ref for immediate synchronous check to prevent race conditions
+    if (!query.trim() || isSubmittingRef.current || isLoading) {
+      return;
+    }
 
+    // Set ref immediately (synchronous) to prevent duplicate submissions
+    isSubmittingRef.current = true;
     setIsLoading(true);
     onStepChange("planning");
 
@@ -68,6 +76,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
       onStepChange("idle");
     } finally {
       setIsLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -96,14 +105,20 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="What's trending this week in creator monetization, and give me 10 content ideas for LinkedIn + X."
+          placeholder="Enter your query"
           className={styles.chatInput}
           disabled={isLoading}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (isLoading || isSubmittingRef.current || !query.trim())) {
+              e.preventDefault();
+            }
+          }}
         />
         <button
           type="submit"
-          disabled={isLoading || !query.trim()}
+          disabled={isLoading || isSubmittingRef.current || !query.trim()}
           className={styles.submitButton}
+          aria-busy={isLoading}
         >
           {isLoading ? "Researching..." : "Start Research"}
         </button>
