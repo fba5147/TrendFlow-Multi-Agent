@@ -10,7 +10,12 @@ import { llm } from "../llm";
  * Parses user query, extracts scope, selects tools
  */
 export async function researchPlanningNode(state: AgentState): Promise<Partial<AgentState>> {
-  const systemPrompt = `You are a research planning assistant for Gallium AI. Analyze the user's query and extract:
+  const persona = state.userPersona || "";
+  const brandPrompt = getGalliumAIBrandPrompt(persona);
+  
+  const systemPrompt = `${brandPrompt}
+
+You are a research planning assistant for Gallium AI. Analyze the user's query and extract:
 1. Time window (e.g., "this week", "Q1 2024", "last month", "recent") - REQUIRED, must be a string, never null
 2. Region/geography (if specified, e.g., "US", "global", "Europe") - Can be null if not mentioned
 3. Domain/topic area (the core subject) - REQUIRED, must be a string extracted from the query, never null
