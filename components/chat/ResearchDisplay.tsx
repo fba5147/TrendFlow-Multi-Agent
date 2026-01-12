@@ -77,14 +77,19 @@ export default function ResearchDisplay({ trends }: ResearchDisplayProps) {
     );
   }
 
+  // Sort trends by confidence (descending - highest first) to ensure proper ordering
+  const sortedTrends = [...trends].sort(
+    (a, b) => (b.confidence || 0) - (a.confidence || 0)
+  );
+
   return (
     <div className={styles.researchContainer}>
       <div className={styles.researchHeader}>
         <h2 className={styles.researchTitle}>Research Results</h2>
-        <span className={styles.trendCount}>{trends.length} trend{trends.length !== 1 ? 's' : ''} found</span>
+        <span className={styles.trendCount}>{sortedTrends.length} trend{sortedTrends.length !== 1 ? 's' : ''} found</span>
       </div>
       
-      {trends.map((trend, index) => (
+      {sortedTrends.map((trend, index) => (
         <div key={index} className={styles.trendCard}>
           <div className={styles.trendHeader}>
             <h3 className={styles.trendTitle}>{trend.title}</h3>

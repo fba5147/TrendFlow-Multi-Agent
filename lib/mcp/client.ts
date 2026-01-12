@@ -1,5 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { llm } from "../llm";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { GALLIUM_BRAND_PROMPT } from "../prompts";
 
 interface SearchResult {
   url: string;
@@ -80,6 +83,8 @@ async function callMCPTool(toolName: string, args: Record<string, any>): Promise
       arguments: args,
     });
 
+    console.log(`[MCP] Result: ${JSON.stringify(result)}`);
+
     if (result.isError) {
       throw new Error(`MCP tool error: ${JSON.stringify(result)}`);
     }
@@ -99,8 +104,10 @@ async function callMCPTool(toolName: string, args: Record<string, any>): Promise
  * - google_search
  * - web_search
  * - search
+ * 
+ * Yields results incrementally as they're parsed
  */
-async function searchWithMCP(query: string, maxResults: number = 10): Promise<SearchResult[]> {
+async function* searchWithMCP(query: string, maxResults: number = 10): AsyncGenerator<SearchResult, void, unknown> {
   if (!mcpClient) {
     throw new Error("MCP client not available");
   }
@@ -136,8 +143,8 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
     ...(process.env.BRAVE_API_KEY && { api_key: process.env.BRAVE_API_KEY }),
   });
 
-  // Parse results based on tool response format
-  const results: SearchResult[] = [];
+  // Parse results based on tool response format and yield incrementally
+  let resultCount = 0;
 
   for (const content of result) {
     if (content.type === "text") {
@@ -149,32 +156,38 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
         if (data.results && Array.isArray(data.results)) {
           // Brave Search format
           for (const item of data.results) {
-            results.push({
+            if (resultCount >= maxResults) return;
+            yield {
               url: item.url || item.link || "",
               title: item.title || "",
               snippet: item.description || item.snippet || "",
               timestamp: item.published_date,
-            });
+            };
+            resultCount++;
           }
         } else if (data.items && Array.isArray(data.items)) {
           // Google Search format
           for (const item of data.items) {
-            results.push({
+            if (resultCount >= maxResults) return;
+            yield {
               url: item.link || item.url || "",
               title: item.title || "",
               snippet: item.snippet || item.description || "",
               timestamp: item.pagemap?.metatags?.[0]?.["article:published_time"],
-            });
+            };
+            resultCount++;
           }
         } else if (Array.isArray(data)) {
           // Direct array format
           for (const item of data) {
-            results.push({
+            if (resultCount >= maxResults) return;
+            yield {
               url: item.url || item.link || "",
               title: item.title || "",
               snippet: item.snippet || item.description || "",
               timestamp: item.timestamp,
-            });
+            };
+            resultCount++;
           }
         }
       } catch (e) {
@@ -185,6 +198,7 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
         const resultBlocks = text.split(/\n\n+/);
         
         for (const block of resultBlocks) {
+          if (resultCount >= maxResults) return;
           const titleMatch = block.match(/Title:\s*(.+?)(?:\n|$)/i);
           const descriptionMatch = block.match(/Description:\s*([\s\S]+?)(?:\n(?:Title:|URL:)|$)/i);
           const urlMatch = block.match(/URL:\s*(.+?)(?:\n|$)/i);
@@ -194,31 +208,34 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
               ? descriptionMatch[1].trim().replace(/\n+/g, " ").replace(/\s+/g, " ")
               : "";
             
-            results.push({
+            yield {
               url: urlMatch ? urlMatch[1].trim() : "",
               title: titleMatch ? titleMatch[1].trim() : "",
               snippet: description.substring(0, 300) || "",
-            });
+            };
+            resultCount++;
           }
         }
         
         // If no structured blocks found with double newlines, try parsing line by line
-        if (results.length === 0) {
+        if (resultCount === 0) {
           const lines = text.split('\n');
           let currentResult: Partial<SearchResult> = {};
           
           for (const line of lines) {
+            if (resultCount >= maxResults) return;
             const trimmedLine = line.trim();
             if (!trimmedLine) continue;
             
             if (trimmedLine.startsWith('Title:')) {
               if (currentResult.url || currentResult.title) {
-                // Save previous result
-                results.push({
+                // Yield previous result
+                yield {
                   url: currentResult.url || "",
                   title: currentResult.title || "",
                   snippet: (currentResult.snippet || "").trim(),
-                });
+                };
+                resultCount++;
               }
               currentResult = { 
                 title: trimmedLine.replace(/^Title:\s*/i, '').trim(),
@@ -228,13 +245,14 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
               currentResult.snippet = trimmedLine.replace(/^Description:\s*/i, '').trim();
             } else if (trimmedLine.startsWith('URL:')) {
               currentResult.url = trimmedLine.replace(/^URL:\s*/i, '').trim();
-              // Save this result
+              // Yield this result
               if (currentResult.title || currentResult.url) {
-                results.push({
+                yield {
                   url: currentResult.url || "",
                   title: currentResult.title || "",
                   snippet: (currentResult.snippet || "").trim(),
-                });
+                };
+                resultCount++;
               }
               currentResult = {};
             } else if (currentResult.title && trimmedLine) {
@@ -247,24 +265,26 @@ async function searchWithMCP(query: string, maxResults: number = 10): Promise<Se
           
           // Don't forget the last result
           if (currentResult.url || currentResult.title) {
-            results.push({
-              url: currentResult.url || "",
-              title: currentResult.title || "",
-              snippet: (currentResult.snippet || "").trim(),
-            });
+            if (resultCount < maxResults) {
+              yield {
+                url: currentResult.url || "",
+                title: currentResult.title || "",
+                snippet: (currentResult.snippet || "").trim(),
+              };
+              resultCount++;
+            }
           }
         }
       }
     }
   }
 
-  if (results.length === 0) {
+  if (resultCount === 0) {
     console.error(`[MCP] Failed to parse results. Raw response:`, JSON.stringify(result, null, 2));
     throw new Error("No search results returned from MCP server");
   }
 
-  console.log(`[MCP] Parsed ${results.length} results from MCP server`);
-  return results.slice(0, maxResults);
+  console.log(`[MCP] Parsed ${resultCount} results from MCP server`);
 }
 
 
@@ -292,19 +312,16 @@ export async function fetchTrendsIncremental(
     throw new Error("MCP client is not available. Please configure MCP_SERVER_COMMAND in .env");
   }
   
-  // Use MCP to search
-  const searchResults = await searchWithMCP(query, 10);
-  console.log(`[MCP] Got ${searchResults.length} results from MCP`);
-  
-  if (searchResults.length === 0) {
-    throw new Error("No search results returned from MCP server");
-  }
-  
+  // Use MCP to search - results come incrementally
   // Convert search results to trend format incrementally
   // Enhanced processing with better filtering and quality checks
   const trends: any[] = [];
+  let hasResults = false;
   
-  for (const result of searchResults) {
+  for await (const result of searchWithMCP(query, 10)) {
+    hasResults = true;
+    
+    // Process and yield trend immediately as we get each result
     // Skip invalid results
     if (!result.title || result.title.trim().length === 0) {
       console.warn(`[MCP] Skipping result with empty title: ${result.url}`);
@@ -326,10 +343,12 @@ export async function fetchTrendsIncremental(
       continue;
     }
     
+    const confidence = calculateConfidence(result, timeWindow);
+    const whyItMatters = await generateWhyItMatters(cleanSnippet, query);
     const trend = {
       title: cleanTitle,
       summary: cleanSnippet.substring(0, 200) + (cleanSnippet.length > 200 ? "..." : ""),
-      whyItMatters: generateWhyItMatters(cleanSnippet, query),
+      whyItMatters: whyItMatters,
       sources: [
         {
           url: result.url,
@@ -337,8 +356,11 @@ export async function fetchTrendsIncremental(
           snippet: cleanSnippet.substring(0, 150),
         },
       ],
-      confidence: calculateConfidence(result, timeWindow),
+      confidence: confidence,
     };
+    
+    // Print confidence score for each source
+    console.log(`[MCP] Source confidence: ${(confidence * 100).toFixed(1)}% | Title: "${cleanTitle.substring(0, 60)}${cleanTitle.length > 60 ? '...' : ''}" | URL: ${result.url}`);
     
     trends.push(trend);
     
@@ -348,7 +370,11 @@ export async function fetchTrendsIncremental(
     }
   }
   
-  console.log(`[MCP] Converted ${trends.length} valid trend(s) from ${searchResults.length} search result(s)`);
+  if (!hasResults) {
+    throw new Error("No search results returned from MCP server");
+  }
+  
+  console.log(`[MCP] Converted ${trends.length} valid trend(s) from search results`);
   return trends;
 }
 
@@ -368,17 +394,55 @@ export async function fetchTrends(
 }
 
 /**
- * Generate "why it matters" explanation
+ * Generate "why it matters" explanation using the main agent LLM
  */
-function generateWhyItMatters(snippet: string, query: string): string {
-  if (snippet.toLowerCase().includes("growth") || snippet.toLowerCase().includes("increase")) {
-    return `This trend shows significant growth potential in ${query}, indicating a shift in market dynamics.`;
-  } else if (snippet.toLowerCase().includes("new") || snippet.toLowerCase().includes("emerging")) {
-    return `This represents an emerging development in ${query} that could reshape the industry landscape.`;
-  } else if (snippet.toLowerCase().includes("change") || snippet.toLowerCase().includes("shift")) {
-    return `This trend signals an important shift in how ${query} is evolving, with implications for stakeholders.`;
+async function generateWhyItMatters(snippet: string, query: string): Promise<string> {
+  try {
+    const systemPrompt = `${GALLIUM_BRAND_PROMPT}
+
+You are analyzing a trend snippet and generating a concise "why it matters" explanation.
+
+Requirements:
+- 1-2 sentences maximum
+- Sharp, opinionated, no corporate fluff (Gallium voice)
+- Focus on why this matters RIGHT NOW for marketers/growth teams
+- Be concrete and actionable`;
+
+    const userMessage = `Based on this trend snippet about "${query}", generate a compelling "why it matters" explanation:
+
+Snippet: "${snippet}"
+
+Generate a concise explanation (1-2 sentences) in Gallium's voice: sharp, opinionated, no fluff.`;
+
+    const messages = [
+      new SystemMessage(systemPrompt),
+      new HumanMessage(userMessage),
+    ];
+
+    const response = await llm.invoke(messages);
+    const content = response.content as string;
+    
+    // Clean up the response (remove quotes if wrapped, trim whitespace)
+    const cleaned = content.trim().replace(/^["']|["']$/g, '').trim();
+    
+    // Fallback if response is too short or empty
+    if (cleaned.length < 20) {
+      return `This trend reflects current developments in ${query} that merit attention from growth teams.`;
+    }
+    
+    return cleaned;
+  } catch (error) {
+    console.warn(`[MCP] Failed to generate "why it matters" with LLM, using fallback:`, error);
+    // Fallback to simple rule-based generation if LLM fails
+    if (snippet.toLowerCase().includes("growth") || snippet.toLowerCase().includes("increase")) {
+      return `This trend shows significant growth potential in ${query}, indicating a shift in market dynamics.`;
+    } else if (snippet.toLowerCase().includes("new") || snippet.toLowerCase().includes("emerging")) {
+      return `This represents an emerging development in ${query} that could reshape the industry landscape.`;
+    } else if (snippet.toLowerCase().includes("change") || snippet.toLowerCase().includes("shift")) {
+      return `This trend signals an important shift in how ${query} is evolving, with implications for stakeholders.`;
+    }
+    return `This trend is significant because it reflects current developments in ${query} that merit attention.`;
   }
-  return `This trend is significant because it reflects current developments in ${query} that merit attention.`;
 }
 
 /**

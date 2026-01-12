@@ -103,13 +103,23 @@ export async function POST(request: NextRequest) {
                   });
                 }
                 
-                // If trends exist, save them as research results
+                // If trends exist, save them as research results (only high-confidence >= 70%)
                 if (state.trends && state.trends.length > 0) {
-                  await convex.mutation(api.mutations.saveResearchResults, {
-                    conversationId: conversationId as any,
-                    trends: state.trends,
-                    researchPlan: state.researchPlan,
-                  });
+                  // Filter to only high-confidence trends before saving
+                  const highConfidenceTrends = state.trends.filter(
+                    t => (t.confidence || 0) >= 0.7
+                  );
+                  if (highConfidenceTrends.length > 0) {
+                    // Sort by confidence (descending - highest first) before saving
+                    const sortedTrends = [...highConfidenceTrends].sort(
+                      (a, b) => (b.confidence || 0) - (a.confidence || 0)
+                    );
+                    await convex.mutation(api.mutations.saveResearchResults, {
+                      conversationId: conversationId as any,
+                      trends: sortedTrends,
+                      researchPlan: state.researchPlan,
+                    });
+                  }
                 }
               } else if (state.step === "generating") {
           await convex.mutation(api.mutations.updateConversationStatus, {
@@ -119,13 +129,23 @@ export async function POST(request: NextRequest) {
         }
       },
       onTrendUpdate: async (trends: any[]) => {
-        // Save research results incrementally
+        // Save research results incrementally (trends are already filtered to >= 70% in graph.ts)
         if (trends.length > 0) {
-          await convex.mutation(api.mutations.saveResearchResults, {
-            conversationId: conversationId as any,
-            trends: trends,
-            researchPlan: initialState.researchPlan,
-          });
+          // Double-check: ensure only high-confidence trends are saved
+          const highConfidenceTrends = trends.filter(
+            t => (t.confidence || 0) >= 0.7
+          );
+          if (highConfidenceTrends.length > 0) {
+            // Sort by confidence (descending - highest first) before saving
+            const sortedTrends = [...highConfidenceTrends].sort(
+              (a, b) => (b.confidence || 0) - (a.confidence || 0)
+            );
+            await convex.mutation(api.mutations.saveResearchResults, {
+              conversationId: conversationId as any,
+              trends: sortedTrends,
+              researchPlan: initialState.researchPlan,
+            });
+          }
         }
       },
       onContentUpdate: async (platform: string, ideas: any[]) => {

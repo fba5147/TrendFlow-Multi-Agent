@@ -1,18 +1,9 @@
 import { AgentState, Trend, ResearchPlan, ContentIdea } from "./state";
-import { ChatGroq } from "@langchain/groq";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { fetchTrends, fetchTrendsIncremental } from "../mcp/client";
 import { GALLIUM_BRAND_PROMPT, TREND_SYNTHESIS_PROMPT, getContentGenerationPrompt } from "../prompts";
 import { MAIN_PLATFORMS, normalizePlatformName } from "@/utils";
-
-// Initialize LLM with Groq (free tier available)
-// Alternative: Use Ollama for completely local/free
-const llm = new ChatGroq({
-  modelName: process.env.LLM_MODEL,
-  temperature: 0.7,
-  streaming: true,
-  apiKey: process.env.GROQ_API_KEY,
-});
+import { llm } from "../llm";
 
 /**
  * Node 1: Research Planning
@@ -313,76 +304,178 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
   const onTrendFound = (state as unknown as StateWithCallbacks).__onTrendFound;
 
   try {
-    // Try multiple query variations for better results
-    const queryVariations = [
+    // Target: 5-10 trends with confidence >= 0.7 (70%)
+    const MIN_HIGH_CONFIDENCE_TRENDS = 5;
+    const MAX_HIGH_CONFIDENCE_TRENDS = 10;
+    const CONFIDENCE_THRESHOLD = 0.7;
+    
+    // Generate base query variations
+    const baseQueryVariations = [
       query, // Original query
       `${scope.domain} trends ${scope.timeWindow}`, // Simplified format
       scope.region ? `${scope.domain} ${scope.region} ${scope.timeWindow}` : null, // With region emphasis
+      `latest ${scope.domain} ${scope.timeWindow}`, // Latest emphasis
+      `${scope.domain} news ${scope.timeWindow}`, // News emphasis
+      `top ${scope.domain} ${scope.timeWindow}`, // Top emphasis
     ].filter((q): q is string => q !== null && q.length > 3);
-
-    console.log(`[Trend Retrieval] Trying ${queryVariations.length} query variation(s)`);
     
-    // Fetch trends using MCP incrementally (tries best query first)
+    // Additional query variations for extended search
+    const extendedQueryVariations = [
+      `${scope.domain} developments ${scope.timeWindow}`,
+      `${scope.domain} updates ${scope.timeWindow}`,
+      `${scope.domain} insights ${scope.timeWindow}`,
+      `emerging ${scope.domain} ${scope.timeWindow}`,
+      `${scope.domain} analysis ${scope.timeWindow}`,
+      scope.region ? `latest ${scope.domain} ${scope.region} ${scope.timeWindow}` : null,
+      scope.region ? `top ${scope.domain} ${scope.region} ${scope.timeWindow}` : null,
+    ].filter((q): q is string => q !== null && q.length > 3);
+    
+    // Combine all query variations
+    const allQueryVariations = [...baseQueryVariations, ...extendedQueryVariations];
+    
+    console.log(`[Trend Retrieval] Will search until we have ${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS} trends with confidence >= ${CONFIDENCE_THRESHOLD * 100}% OR reach 50 searches`);
+    
+    // Fetch trends using MCP incrementally, keep searching until we have enough high-confidence trends or reach 50 searches
     let allTrends: Trend[] = [];
-    let lastError: Error | null = null;
+    let queryIndex = 0;
+    const maxSearchAttempts = 50; // Maximum searches before reaching checkpoint
+    let searchAttempts = 0;
     
-    // Try primary query first with incremental callback
-    try {
-      const trends = await fetchTrendsIncremental(
-        queryVariations[0], 
-        scope.timeWindow,
-        onTrendFound ? async (trend, allTrendsSoFar) => {
-          // Call the callback with the trend and all trends found so far
-          await onTrendFound(trend, allTrendsSoFar);
-        } : undefined
+    while (searchAttempts < maxSearchAttempts) {
+      // Count high-confidence trends
+      const highConfidenceTrends = allTrends.filter(
+        t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
       );
-      if (trends && trends.length > 0) {
-        allTrends = trends;
-      }
-    } catch (error) {
-      console.warn(`[Trend Retrieval] Primary query failed, trying alternatives...`);
-      lastError = error instanceof Error ? error : new Error(String(error));
       
-      // Try alternative queries if primary fails (non-incremental for fallback)
-      for (let i = 1; i < queryVariations.length && allTrends.length === 0; i++) {
-        try {
-          const trends = await fetchTrends(queryVariations[i], scope.timeWindow);
-          if (trends && trends.length > 0) {
-            allTrends = trends;
-            console.log(`[Trend Retrieval] Alternative query "${queryVariations[i]}" succeeded`);
-            break;
-          }
-        } catch (altError) {
-          console.warn(`[Trend Retrieval] Alternative query "${queryVariations[i]}" also failed`);
-        }
+      // Stop if we have 5-10 high-confidence trends
+      if (highConfidenceTrends.length >= MIN_HIGH_CONFIDENCE_TRENDS && 
+          highConfidenceTrends.length <= MAX_HIGH_CONFIDENCE_TRENDS) {
+        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} high-confidence trends (target reached), stopping search and proceeding to checkpoint`);
+        break;
       }
+      
+      // Stop if we exceed max (shouldn't happen, but safety check)
+      if (highConfidenceTrends.length > MAX_HIGH_CONFIDENCE_TRENDS) {
+        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} high-confidence trends (exceeds max), stopping search and proceeding to checkpoint`);
+        break;
+      }
+      
+      // Cycle through query variations (reuse queries if we need more searches)
+      const currentQuery = allQueryVariations[queryIndex % allQueryVariations.length];
+      console.log(`[Trend Retrieval] Search attempt ${searchAttempts + 1}/${maxSearchAttempts}: "${currentQuery}" (${highConfidenceTrends.length}/${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS} high-confidence trends found)`);
+      
+      try {
+        const trends = await fetchTrendsIncremental(
+          currentQuery, 
+          scope.timeWindow,
+          undefined // Don't use incremental callback, we'll batch send after each search
+        );
+        
+        if (trends && trends.length > 0) {
+          // Print confidence scores for each trend found
+          console.log(`[Trend Retrieval] Confidence scores for trends from query "${currentQuery}":`);
+          trends.forEach((trend, index) => {
+            const conf = (trend.confidence || 0) * 100;
+            const status = conf >= CONFIDENCE_THRESHOLD * 100 ? '✓' : '✗';
+            console.log(`  ${status} [${index + 1}] ${conf.toFixed(1)}% - "${trend.title.substring(0, 50)}${trend.title.length > 50 ? '...' : ''}"`);
+          });
+          
+          // Add new trends to collection
+          allTrends.push(...trends);
+          
+          // After each search, filter and send only high-confidence trends to frontend
+          const allHighConfTrends = deduplicateTrends(
+            allTrends.filter(t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD)
+          );
+          
+          // Send all high-confidence trends found so far to frontend after each search
+          if (allHighConfTrends.length > 0 && onTrendFound) {
+            // Send the latest high-confidence trend to trigger callback, but pass all high-confidence trends
+            const latestHighConfTrend = allHighConfTrends[allHighConfTrends.length - 1];
+            await onTrendFound(latestHighConfTrend, allHighConfTrends);
+          }
+          
+          const highConfFromThisSearch = trends.filter(
+            t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
+          );
+          console.log(`[Trend Retrieval] Found ${trends.length} new trend(s) from query "${currentQuery}" (${highConfFromThisSearch.length} high-confidence, ${allHighConfTrends.length} total high-confidence)`);
+        }
+      } catch (error) {
+        console.warn(`[Trend Retrieval] Query "${currentQuery}" failed:`, error instanceof Error ? error.message : String(error));
+        // Continue to next query variation
+      }
+      
+      // Cycle through query variations and increment search counter
+      queryIndex++;
+      searchAttempts++;
+      
+      // Small delay between searches to avoid rate limiting
+      if (searchAttempts < maxSearchAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    // Log final status
+    const finalHighConfidenceTrends = allTrends.filter(
+      t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
+    );
+    
+    if (searchAttempts >= maxSearchAttempts) {
+      console.log(`[Trend Retrieval] Reached ${maxSearchAttempts} search attempts. Found ${finalHighConfidenceTrends.length} high-confidence trends. Proceeding to checkpoint.`);
     }
 
     // Deduplicate trends by URL and title similarity
     const uniqueTrends = deduplicateTrends(allTrends);
+    
+    // Filter to ONLY high-confidence trends (>= 0.7) - remove anything below 70%
+    const highConfidenceTrends = uniqueTrends.filter(
+      t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
+    );
 
-    if (!uniqueTrends || uniqueTrends.length === 0) {
-      console.warn(`[Trend Retrieval] No trends found for any query variation`);
+    if (highConfidenceTrends.length === 0) {
+      console.warn(`[Trend Retrieval] No high-confidence trends found for any query variation`);
       return {
         trends: [],
         step: "synthesizing",
-        error: `No trends found for "${scope.domain}". Try broadening your search terms, adjusting the time window, or refining your query.`,
+        error: `No high-confidence trends (≥70%) found for "${scope.domain}". Try broadening your search terms, adjusting the time window, or refining your query.`,
         messages: [
           ...state.messages,
           {
             role: "assistant",
-            content: `No trends found for "${scope.domain}". Try refining your search query or adjusting the time window.`,
+            content: `No high-confidence trends found for "${scope.domain}". Try refining your search query or adjusting the time window.`,
             timestamp: Date.now(),
           },
         ],
       };
     }
+    
+    // If we don't have enough high-confidence trends, log a warning but continue with what we have
+    if (highConfidenceTrends.length < MIN_HIGH_CONFIDENCE_TRENDS) {
+      console.warn(`[Trend Retrieval] Only found ${highConfidenceTrends.length} high-confidence trends (target: ${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS}). Using available high-confidence trends.`);
+    }
 
     console.log(`[Trend Retrieval] Found ${uniqueTrends.length} unique trend(s) from ${allTrends.length} total result(s)`);
+    console.log(`[Trend Retrieval] High-confidence trends (>= ${CONFIDENCE_THRESHOLD * 100}%): ${highConfidenceTrends.length}`);
+    console.log(`[Trend Retrieval] Removed ${uniqueTrends.length - highConfidenceTrends.length} trend(s) below ${CONFIDENCE_THRESHOLD * 100}% confidence`);
+    
+    // Print final confidence scores for all high-confidence trends
+    console.log(`[Trend Retrieval] Final high-confidence trends with confidence scores:`);
+    highConfidenceTrends.forEach((trend, index) => {
+      const conf = (trend.confidence || 0) * 100;
+      console.log(`  [${index + 1}] ${conf.toFixed(1)}% - "${trend.title}"`);
+    });
+
+    // Use only high-confidence trends, limit to MAX_HIGH_CONFIDENCE_TRENDS
+    const trendsToUse = highConfidenceTrends.slice(0, MAX_HIGH_CONFIDENCE_TRENDS);
 
     // Sort by confidence before passing to synthesis
-    const sortedTrends = uniqueTrends.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+    const sortedTrends = trendsToUse.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
 
+    const highConfCount = sortedTrends.length; // All trends are high-confidence now
+    const searchStatus = searchAttempts >= maxSearchAttempts 
+      ? `Completed ${maxSearchAttempts} searches`
+      : `Found target range (${highConfCount} trends)`;
+    
     return {
       trends: sortedTrends,
       step: "synthesizing",
@@ -390,7 +483,7 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
         ...state.messages,
         {
           role: "assistant",
-          content: `Found ${sortedTrends.length} unique trend${sortedTrends.length !== 1 ? 's' : ''} related to ${scope.domain}. Analyzing and ranking...`,
+          content: `${searchStatus}. Found ${sortedTrends.length} unique high-confidence trend${sortedTrends.length !== 1 ? 's' : ''} (≥70%) related to ${scope.domain}. Analyzing and ranking...`,
           timestamp: Date.now(),
         },
       ],
