@@ -1,6 +1,6 @@
 import { AgentState, Trend, ResearchPlan, ContentIdea } from "./state";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { fetchTrends, fetchTrendsIncremental } from "../mcp/client";
+import { fetchTrendsIncremental } from "../mcp/client";
 import { getGalliumAIBrandPrompt, getTrendSynthesisPrompt, getContentGenerationPrompt } from "../prompts";
 import { MAIN_PLATFORMS, normalizePlatformName } from "@/utils";
 import { llm } from "../llm";
@@ -973,20 +973,6 @@ export function hitlCheckpointNode(state: AgentState): Partial<AgentState> {
     checkpointStatus: "pending",
     approvedTrends: state.approvedTrends || state.trends || [], // Use approvedTrends from synthesis if available
   };
-}
-
-/**
- * Conditional edge: Check if approved
- */
-export function shouldProceedToGeneration(state: AgentState): boolean {
-  return state.checkpointStatus === "approved" && !!state.approvedTrends;
-}
-
-/**
- * Conditional edge: Check if needs refinement
- */
-export function shouldRefineResearch(state: AgentState): boolean {
-  return state.checkpointStatus === "refined" && !!state.refinementRequest;
 }
 
 /**

@@ -584,22 +584,6 @@ export async function fetchTrendsIncremental(
   return trends;
 }
 
-/**
- * Fetch trends using MCP tools
- * 
- * This function searches the web for trending topics related to the query
- * and returns structured trend data with citations.
- * 
- * Requires MCP_SERVER_COMMAND to be set in environment variables.
- */
-export async function fetchTrends(
-  query: string,
-  timeWindow: string,
-  domain?: string,
-  persona?: string
-): Promise<any[]> {
-  return fetchTrendsIncremental(query, timeWindow, undefined, domain, persona);
-}
 
 /**
  * Extract date from URL patterns

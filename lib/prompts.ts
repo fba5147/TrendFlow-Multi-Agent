@@ -55,8 +55,6 @@ Example format:
 ]`;
 }
 
-// Keep the constant for backward compatibility (default persona)
-export const TREND_SYNTHESIS_PROMPT = getTrendSynthesisPrompt();
 
 export function getContentGenerationPrompt(platform: string, persona: string = "Growth lead at a D2C brand"): string {
   // Handle "Other" platform category
@@ -225,6 +223,4 @@ User persona: ${persona}
 Respond with JSON array.`;
 }
 
-// Keep the constant for backward compatibility (default persona)
-export const CONTENT_IDEA_FORMAT = getContentIdeaFormat();
 
