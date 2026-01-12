@@ -1,7 +1,7 @@
 import { AgentState, Trend, ResearchPlan, ContentIdea } from "./state";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { fetchTrends, fetchTrendsIncremental } from "../mcp/client";
-import { GALLIUM_BRAND_PROMPT, TREND_SYNTHESIS_PROMPT, getContentGenerationPrompt } from "../prompts";
+import { getGalliumAIBrandPrompt, getTrendSynthesisPrompt, getContentGenerationPrompt } from "../prompts";
 import { MAIN_PLATFORMS, normalizePlatformName } from "@/utils";
 import { llm } from "../llm";
 
@@ -10,7 +10,7 @@ import { llm } from "../llm";
  * Parses user query, extracts scope, selects tools
  */
 export async function researchPlanningNode(state: AgentState): Promise<Partial<AgentState>> {
-  const systemPrompt = `You are a research planning assistant for Gallium. Analyze the user's query and extract:
+  const systemPrompt = `You are a research planning assistant for Gallium AI. Analyze the user's query and extract:
 1. Time window (e.g., "this week", "Q1 2024", "last month", "recent") - REQUIRED, must be a string, never null
 2. Region/geography (if specified, e.g., "US", "global", "Europe") - Can be null if not mentioned
 3. Domain/topic area (the core subject) - REQUIRED, must be a string extracted from the query, never null
@@ -304,10 +304,10 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
   const onTrendFound = (state as unknown as StateWithCallbacks).__onTrendFound;
 
   try {
-    // Target: 5-10 trends with confidence >= 0.7 (70%)
+    // Target: 5-10 trends with confidence >= 0.65 (65%)
     const MIN_HIGH_CONFIDENCE_TRENDS = 5;
     const MAX_HIGH_CONFIDENCE_TRENDS = 10;
-    const CONFIDENCE_THRESHOLD = 0.7;
+    const CONFIDENCE_THRESHOLD = 0.65;
     
     // Generate base query variations
     const baseQueryVariations = [
@@ -342,34 +342,37 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
     let searchAttempts = 0;
     
     while (searchAttempts < maxSearchAttempts) {
-      // Count high-confidence trends
-      const highConfidenceTrends = allTrends.filter(
+      // Deduplicate trends first, then count high-confidence trends (don't count duplicates)
+      const uniqueTrendsSoFar = deduplicateTrends(allTrends);
+      const highConfidenceTrends = uniqueTrendsSoFar.filter(
         t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
       );
       
-      // Stop if we have 5-10 high-confidence trends
+      // Stop if we have 5-10 unique high-confidence trends
       if (highConfidenceTrends.length >= MIN_HIGH_CONFIDENCE_TRENDS && 
           highConfidenceTrends.length <= MAX_HIGH_CONFIDENCE_TRENDS) {
-        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} high-confidence trends (target reached), stopping search and proceeding to checkpoint`);
+        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} unique high-confidence trends (target reached), stopping search and proceeding to checkpoint`);
         break;
       }
       
       // Stop if we exceed max (shouldn't happen, but safety check)
       if (highConfidenceTrends.length > MAX_HIGH_CONFIDENCE_TRENDS) {
-        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} high-confidence trends (exceeds max), stopping search and proceeding to checkpoint`);
+        console.log(`[Trend Retrieval] Found ${highConfidenceTrends.length} unique high-confidence trends (exceeds max), stopping search and proceeding to checkpoint`);
         break;
       }
       
       // Cycle through query variations (reuse queries if we need more searches)
       const currentQuery = allQueryVariations[queryIndex % allQueryVariations.length];
-      console.log(`[Trend Retrieval] Search attempt ${searchAttempts + 1}/${maxSearchAttempts}: "${currentQuery}" (${highConfidenceTrends.length}/${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS} high-confidence trends found)`);
+      console.log(`[Trend Retrieval] Search attempt ${searchAttempts + 1}/${maxSearchAttempts}: "${currentQuery}" (${highConfidenceTrends.length} unique high-confidence/${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS} target)`);
       
       try {
+        const persona = state.userPersona || "";
         const trends = await fetchTrendsIncremental(
           currentQuery,
           scope.timeWindow,
           onTrendFound,
-          scope.domain
+          scope.domain,
+          persona
         );
         
         if (trends && trends.length > 0) {
@@ -384,22 +387,32 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
           // Add new trends to collection
           allTrends.push(...trends);
           
-          // After each search, filter and send only high-confidence trends to frontend
-          const allHighConfTrends = deduplicateTrends(
-            allTrends.filter(t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD)
+          // Deduplicate all trends, then filter to high-confidence (don't count duplicates)
+          const uniqueAllTrends = deduplicateTrends(allTrends);
+          const allHighConfTrends = uniqueAllTrends.filter(
+            t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
           );
           
-          // Send all high-confidence trends found so far to frontend after each search
+          // Send all unique high-confidence trends found so far to frontend after each search
           if (allHighConfTrends.length > 0 && onTrendFound) {
             // Send the latest high-confidence trend to trigger callback, but pass all high-confidence trends
             const latestHighConfTrend = allHighConfTrends[allHighConfTrends.length - 1];
             await onTrendFound(latestHighConfTrend, allHighConfTrends);
           }
           
-          const highConfFromThisSearch = trends.filter(
+          // Count unique trends from this search (deduplicate against all trends)
+          const uniqueTrendsFromThisSearch = deduplicateTrends(trends);
+          const highConfFromThisSearch = uniqueTrendsFromThisSearch.filter(
             t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
           );
-          console.log(`[Trend Retrieval] Found ${trends.length} new trend(s) from query "${currentQuery}" (${highConfFromThisSearch.length} high-confidence, ${allHighConfTrends.length} total high-confidence)`);
+          
+          // Calculate how many are actually new (not duplicates)
+          const existingUrls = new Set(uniqueAllTrends.slice(0, -highConfFromThisSearch.length).flatMap(t => t.sources.map(s => s.url.toLowerCase())));
+          const newTrendsCount = highConfFromThisSearch.filter(t => 
+            !t.sources.some(s => existingUrls.has(s.url.toLowerCase()))
+          ).length;
+          
+          console.log(`[Trend Retrieval] Found ${trends.length} trend(s) from query "${currentQuery}" (${highConfFromThisSearch.length} unique high-confidence, ${newTrendsCount} new, ${allHighConfTrends.length} total unique high-confidence)`);
         }
       } catch (error) {
         console.warn(`[Trend Retrieval] Query "${currentQuery}" failed:`, error instanceof Error ? error.message : String(error));
@@ -428,17 +441,18 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
     // Deduplicate trends by URL and title similarity
     const uniqueTrends = deduplicateTrends(allTrends);
     
-    // Filter to ONLY high-confidence trends (>= 0.7) - remove anything below 70%
+    // Filter to ONLY high-confidence trends (>= 0.65) - remove anything below 65%
+    // Note: uniqueTrends is already deduplicated, so counts don't include duplicates
     const highConfidenceTrends = uniqueTrends.filter(
       t => (t.confidence || 0) >= CONFIDENCE_THRESHOLD
     );
 
     if (highConfidenceTrends.length === 0) {
-      console.warn(`[Trend Retrieval] No high-confidence trends found for any query variation`);
+      console.warn(`[Trend Retrieval] No unique high-confidence trends found for any query variation`);
       return {
         trends: [],
         step: "synthesizing",
-        error: `No high-confidence trends (≥70%) found for "${scope.domain}". Try broadening your search terms, adjusting the time window, or refining your query.`,
+        error: `No high-confidence trends (≥65%) found for "${scope.domain}". Try broadening your search terms, adjusting the time window, or refining your query.`,
         messages: [
           ...state.messages,
           {
@@ -452,11 +466,12 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
     
     // If we don't have enough high-confidence trends, log a warning but continue with what we have
     if (highConfidenceTrends.length < MIN_HIGH_CONFIDENCE_TRENDS) {
-      console.warn(`[Trend Retrieval] Only found ${highConfidenceTrends.length} high-confidence trends (target: ${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS}). Using available high-confidence trends.`);
+      console.warn(`[Trend Retrieval] Only found ${highConfidenceTrends.length} unique high-confidence trends (target: ${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS}). Using available high-confidence trends.`);
     }
 
-    console.log(`[Trend Retrieval] Found ${uniqueTrends.length} unique trend(s) from ${allTrends.length} total result(s)`);
-    console.log(`[Trend Retrieval] High-confidence trends (>= ${CONFIDENCE_THRESHOLD * 100}%): ${highConfidenceTrends.length}`);
+    const duplicatesRemoved = allTrends.length - uniqueTrends.length;
+    console.log(`[Trend Retrieval] Found ${uniqueTrends.length} unique trend(s) from ${allTrends.length} total result(s) (removed ${duplicatesRemoved} duplicate${duplicatesRemoved !== 1 ? 's' : ''})`);
+    console.log(`[Trend Retrieval] Unique high-confidence trends (>= ${CONFIDENCE_THRESHOLD * 100}%): ${highConfidenceTrends.length}`);
     console.log(`[Trend Retrieval] Removed ${uniqueTrends.length - highConfidenceTrends.length} trend(s) below ${CONFIDENCE_THRESHOLD * 100}% confidence`);
     
     // Print final confidence scores for all high-confidence trends
@@ -484,7 +499,7 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
         ...state.messages,
         {
           role: "assistant",
-          content: `${searchStatus}. Found ${sortedTrends.length} unique high-confidence trend${sortedTrends.length !== 1 ? 's' : ''} (≥70%) related to ${scope.domain}. Analyzing and ranking...`,
+          content: `${searchStatus}. Found ${sortedTrends.length} unique high-confidence trend${sortedTrends.length !== 1 ? 's' : ''} (≥65%) related to ${scope.domain}. Analyzing and ranking...`,
           timestamp: Date.now(),
         },
       ],
@@ -510,7 +525,99 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
 }
 
 /**
- * Deduplicate trends by URL and title similarity
+ * Calculate similarity between two titles (0-1)
+ */
+function calculateTitleSimilarity(title1: string, title2: string): number {
+  const t1 = title1.toLowerCase().trim();
+  const t2 = title2.toLowerCase().trim();
+  
+  if (t1 === t2) return 1.0;
+  
+  // Word overlap
+  const words1 = new Set(t1.split(/\s+/).filter(w => w.length > 3));
+  const words2 = new Set(t2.split(/\s+/).filter(w => w.length > 3));
+  const intersection = new Set([...words1].filter(w => words2.has(w)));
+  const union = new Set([...words1, ...words2]);
+  
+  if (union.size === 0) return 0;
+  
+  const wordOverlap = intersection.size / union.size;
+  
+  // Substring match
+  const minLen = Math.min(t1.length, t2.length);
+  const maxLen = Math.max(t1.length, t2.length);
+  let substringMatch = 0;
+  
+  if (minLen >= 10) {
+    const shorter = t1.length < t2.length ? t1 : t2;
+    const longer = t1.length >= t2.length ? t1 : t2;
+    if (longer.includes(shorter.substring(0, Math.min(20, shorter.length)))) {
+      substringMatch = 0.3;
+    }
+  }
+  
+  return Math.min(1.0, wordOverlap * 0.7 + substringMatch);
+}
+
+/**
+ * Merge sources from similar trends to provide multiple citations
+ */
+function mergeSourcesFromSimilarTrends(trends: Trend[]): Trend[] {
+  const merged: Trend[] = [];
+  const processed = new Set<number>();
+  
+  for (let i = 0; i < trends.length; i++) {
+    if (processed.has(i)) continue;
+    
+    const trend = trends[i];
+    const similarTrends: Trend[] = [trend];
+    const allSources = new Map<string, typeof trend.sources[0]>();
+    
+    // Add sources from current trend
+    trend.sources.forEach(source => {
+      allSources.set(source.url.toLowerCase(), source);
+    });
+    
+    // Find similar trends and merge their sources
+    for (let j = i + 1; j < trends.length; j++) {
+      if (processed.has(j)) continue;
+      
+      const otherTrend = trends[j];
+      const similarity = calculateTitleSimilarity(trend.title, otherTrend.title);
+      
+      // If titles are similar (>= 60% similarity), merge sources
+      if (similarity >= 0.6) {
+        similarTrends.push(otherTrend);
+        processed.add(j);
+        
+        // Merge sources from similar trend
+        otherTrend.sources.forEach(source => {
+          const urlKey = source.url.toLowerCase();
+          if (!allSources.has(urlKey)) {
+            allSources.set(urlKey, source);
+          }
+        });
+      }
+    }
+    
+    // Use the trend with highest confidence, but with all merged sources
+    const bestTrend = similarTrends.reduce((best, current) => 
+      (current.confidence || 0) > (best.confidence || 0) ? current : best
+    );
+    
+    merged.push({
+      ...bestTrend,
+      sources: Array.from(allSources.values()),
+    });
+    
+    processed.add(i);
+  }
+  
+  return merged;
+}
+
+/**
+ * Deduplicate trends by URL and title similarity, merging sources from similar trends
  */
 function deduplicateTrends(trends: Trend[]): Trend[] {
   const seen = new Set<string>();
@@ -526,7 +633,7 @@ function deduplicateTrends(trends: Trend[]): Trend[] {
       seen.add(key);
       unique.push(trend);
     } else {
-      // If duplicate found, keep the one with higher confidence
+      // If duplicate found, merge sources and keep the one with higher confidence
       const existing = unique.find(t => {
         const tUrl = t.sources?.[0]?.url || "";
         const tTitle = t.title || "";
@@ -534,14 +641,35 @@ function deduplicateTrends(trends: Trend[]): Trend[] {
                (tTitle.toLowerCase() === title.toLowerCase() && !url);
       });
       
-      if (existing && (trend.confidence || 0) > (existing.confidence || 0)) {
-        const index = unique.indexOf(existing);
-        unique[index] = trend;
+      if (existing) {
+        // Merge sources from both trends (avoid duplicates)
+        const existingUrls = new Set(existing.sources.map(s => s.url.toLowerCase()));
+        const newSources = trend.sources.filter(s => !existingUrls.has(s.url.toLowerCase()));
+        
+        // Merge sources, keeping existing ones first, then adding new unique ones
+        const mergedSources = [...existing.sources, ...newSources];
+        
+        // Keep the trend with higher confidence, but use merged sources
+        if ((trend.confidence || 0) > (existing.confidence || 0)) {
+          const index = unique.indexOf(existing);
+          unique[index] = {
+            ...trend,
+            sources: mergedSources, // Use merged sources
+          };
+        } else {
+          // Update existing with merged sources
+          const index = unique.indexOf(existing);
+          unique[index] = {
+            ...existing,
+            sources: mergedSources, // Use merged sources
+          };
+        }
       }
     }
   }
   
-  return unique;
+  // After deduplication, merge sources from similar trends
+  return mergeSourcesFromSimilarTrends(unique);
 }
 
 /**
@@ -556,9 +684,10 @@ export async function synthesisNode(state: AgentState): Promise<Partial<AgentSta
     };
   }
 
-  const systemPrompt = `${GALLIUM_BRAND_PROMPT}
+  const persona = state.userPersona || "";
+  const systemPrompt = `${getGalliumAIBrandPrompt(persona)}
   
-  ${TREND_SYNTHESIS_PROMPT}`;
+  ${getTrendSynthesisPrompt(persona)}`;
 
   // Build comprehensive trend context for LLM
   const trendsText = state.trends
@@ -568,14 +697,20 @@ export async function synthesisNode(state: AgentState): Promise<Partial<AgentSta
     )
     .join("\n\n");
 
+  // Determine max trends to return (don't ask for more than we have)
+  const maxTrends = Math.min(state.trends.length, 10);
+  const minTrends = Math.min(state.trends.length, 5);
+  
   const messages = [
     new SystemMessage(systemPrompt),
-    new HumanMessage(`Analyze and rank these ${state.trends.length} trends for marketing teams:\n\n${trendsText}\n\nFocus on:
+    new HumanMessage(`Analyze and rank these ${state.trends.length} trend${state.trends.length !== 1 ? 's' : ''} for marketing teams:\n\n${trendsText}\n\nFocus on:
 - Which trends are most actionable for content creators and marketers?
 - Which have the strongest evidence and recency?
 - Which are most relevant to growth and engagement?
 
-Return top 5-10 trends ranked by relevance and impact. Prioritize trends with concrete data, recent sources, and clear marketing applications.`),
+Return ${state.trends.length <= 5 ? `all ${state.trends.length}` : `top ${minTrends}-${maxTrends}`} trend${state.trends.length !== 1 ? 's' : ''} ranked by relevance and impact. ${state.trends.length > 10 ? 'Limit to the top 10 most actionable trends.' : 'Include all trends if they are relevant.'} Prioritize trends with concrete data, recent sources, and clear marketing applications.
+
+IMPORTANT: Only return trends that match the titles provided above. Do not create new trends. Return exactly ${state.trends.length <= 10 ? state.trends.length : maxTrends} trend${(state.trends.length <= 10 ? state.trends.length : maxTrends) !== 1 ? 's' : ''} or fewer.`),
   ];
 
   try {
@@ -650,8 +785,10 @@ Return top 5-10 trends ranked by relevance and impact. Prioritize trends with co
     }
 
     // Merge LLM-enhanced data with original sources (match by title similarity)
+    // Limit to the number of original trends (don't create more than we started with)
+    const maxTrendsToReturn = Math.min(state.trends.length, 10);
     const synthesizedTrends: Trend[] = rankedTrends
-      .slice(0, 10) // Top 10
+      .slice(0, maxTrendsToReturn) // Limit to original count or 10, whichever is smaller
       .map((ranked: RankedTrendFromLLM, index: number): Trend | undefined => {
         // Try to match by exact title first
         let original = state.trends!.find((t) => 
@@ -691,11 +828,35 @@ Return top 5-10 trends ranked by relevance and impact. Prioritize trends with co
           return undefined;
         }
         
+        // Try to find additional sources from other similar trends
+        let mergedSources = original.sources || [];
+        if (mergedSources.length < 3) {
+          // Look for similar trends to merge sources
+          const similarTrends = state.trends!.filter(t => {
+            if (t.title === original.title) return false; // Skip self
+            const similarity = calculateTitleSimilarity(original.title, t.title);
+            return similarity >= 0.5; // 50% similarity threshold
+          });
+          
+          // Merge sources from similar trends (up to 3-4 total sources)
+          const sourceUrls = new Set(mergedSources.map(s => s.url.toLowerCase()));
+          for (const similarTrend of similarTrends) {
+            if (mergedSources.length >= 4) break; // Limit to 4 sources max
+            for (const source of similarTrend.sources || []) {
+              if (!sourceUrls.has(source.url.toLowerCase())) {
+                mergedSources.push(source);
+                sourceUrls.add(source.url.toLowerCase());
+                if (mergedSources.length >= 4) break;
+              }
+            }
+          }
+        }
+        
         return {
           title: ranked.title || original.title,
           summary: (ranked.summary || original.summary).substring(0, 250).trim(), // Limit summary length
           whyItMatters: (ranked.whyItMatters || original.whyItMatters || "This trend is significant for marketing teams.").substring(0, 300).trim(), // Limit length
-          sources: original.sources || [],
+          sources: mergedSources, // Use merged sources (multiple when available)
           confidence: typeof ranked.confidence === 'number' && ranked.confidence >= 0 && ranked.confidence <= 1 
             ? ranked.confidence 
             : Math.max(0, Math.min(1, original.confidence || 0.5)), // Clamp confidence to 0-1
@@ -703,37 +864,46 @@ Return top 5-10 trends ranked by relevance and impact. Prioritize trends with co
       })
       .filter((t): t is Trend => t !== null && t !== undefined && !!t?.title && !!t?.summary);
 
-    console.log(`[Synthesis] Processed ${synthesizedTrends.length} trends from ${state.trends.length} original trends`);
-    console.log(`[Synthesis] Returning trends and moving to checkpoint`);
+    // Final deduplication pass to ensure no duplicates in synthesized results
+    const finalSynthesizedTrends = deduplicateTrends(synthesizedTrends);
+    
+    if (finalSynthesizedTrends.length < synthesizedTrends.length) {
+      console.log(`[Synthesis] Removed ${synthesizedTrends.length - finalSynthesizedTrends.length} duplicate trend(s) from synthesis results`);
+    }
+
+    console.log(`[Synthesis] Processed ${finalSynthesizedTrends.length} unique trend${finalSynthesizedTrends.length !== 1 ? 's' : ''} from ${state.trends.length} original trend${state.trends.length !== 1 ? 's' : ''}`);
+    console.log(`[Synthesis] Returning ${finalSynthesizedTrends.length} unique trend${finalSynthesizedTrends.length !== 1 ? 's' : ''} and moving to checkpoint`);
 
     // Return synthesis results - checkpoint node will set checkpointStatus
     return {
-      trends: synthesizedTrends,
+      trends: finalSynthesizedTrends,
       researchComplete: true,
-      approvedTrends: synthesizedTrends, // Pre-populate for checkpoint
+      approvedTrends: finalSynthesizedTrends, // Pre-populate for checkpoint
       messages: [
         ...state.messages,
         {
           role: "assistant",
-          content: `Synthesized ${synthesizedTrends.length} top trends. Ready for review.`,
+          content: `Synthesized ${finalSynthesizedTrends.length} unique top trend${finalSynthesizedTrends.length !== 1 ? 's' : ''}. Ready for review.`,
           timestamp: Date.now(),
         },
       ],
     };
   } catch (error) {
     console.error("[Synthesis] Error:", error);
-    // Fallback: use original trends sorted by confidence
-    const sortedTrends = [...state.trends].sort((a, b) => b.confidence - a.confidence);
+    // Fallback: use original trends sorted by confidence, but deduplicate first
+    const uniqueTrends = deduplicateTrends(state.trends);
+    const sortedTrends = uniqueTrends.sort((a, b) => b.confidence - a.confidence);
+    const trendsToReturn = sortedTrends.slice(0, Math.min(uniqueTrends.length, 10));
     return {
-      trends: sortedTrends.slice(0, 10),
+      trends: trendsToReturn,
       researchComplete: true,
-      approvedTrends: sortedTrends.slice(0, 10),
+      approvedTrends: trendsToReturn,
       error: error instanceof Error ? error.message : "Synthesis failed",
       messages: [
         ...state.messages,
         {
           role: "assistant",
-          content: `Processed ${sortedTrends.length} trends. Ready for review.`,
+          content: `Processed ${trendsToReturn.length} unique trend${trendsToReturn.length !== 1 ? 's' : ''}. Ready for review.`,
           timestamp: Date.now(),
         },
       ],
@@ -838,9 +1008,8 @@ export async function contentGenerationNode(state: AgentState): Promise<Partial<
   const platforms = (state.platforms || MAIN_PLATFORMS as unknown as string[]).map(p => normalizePlatformName(p));
   const contentIdeas: Record<string, ContentIdea[]> = {};
 
-  const brandPrompt = GALLIUM_BRAND_PROMPT;
-
-  const persona = state.userPersona || "Growth lead at a D2C brand";
+  const persona = state.userPersona || "";
+  const brandPrompt = getGalliumAIBrandPrompt(persona);
 
   console.log(`[Content Generation] Starting generation for ${platforms.length} platform(s): ${platforms.join(", ")}`);
 
@@ -862,12 +1031,12 @@ ${platformPrompt}
 
 Context:
 - User persona: ${persona}
-- Brand: Gallium (AI-native operating system for marketing)
+- Brand: Gallium AI (AI-native operating system for marketing)
 - Goal: Generate actionable, platform-optimized content ideas that drive engagement
 
 Requirements:
 - Each idea must be directly tied to one of the approved trends
-- Hooks must be attention-grabbing and align with Gallium's voice (sharp, opinionated, no fluff)
+- Hooks must be attention-grabbing and align with Gallium AI's voice (sharp, opinionated, no fluff)
 - Ideas must be immediately actionable for the specified persona
 - Reference specific data or insights from the trends when possible`;
 
@@ -878,7 +1047,7 @@ ${trendsText}
 
 For EACH content idea, you MUST provide ALL of the following fields:
 
-1. hook: Attention-grabbing opening line (Gallium voice: sharp, opinionated, no corporate fluff)
+1. hook: Attention-grabbing opening line (Gallium AI voice: sharp, opinionated, no corporate fluff)
    - Must capture attention in first 3-5 words
    - Should be provocative or data-driven
    - Example: "Most marketers are doing this wrong. Here's the data."

@@ -1,11 +1,13 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import styles from "./ideaCard.module.css";
 import type { IdeaCardProps } from "@/types";
 import { getDisplayPlatform } from "@/utils";
 
 function IdeaCard({ idea, platform, displayPlatform }: IdeaCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   // Use displayPlatform for styling and labels (normalized/grouped platform)
   const normalizedPlatform = useMemo(
     () => displayPlatform || getDisplayPlatform(platform),
@@ -101,6 +103,35 @@ function IdeaCard({ idea, platform, displayPlatform }: IdeaCardProps) {
     return normalized;
   }, [idea.format, normalizedPlatform]);
 
+  const handleCopyHook = async () => {
+    try {
+      await navigator.clipboard.writeText(idea.hook);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2000);
+    } catch (error) {
+      console.error("Failed to copy hook:", error);
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = idea.hook;
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+        setCopyFeedback(true);
+        setTimeout(() => setCopyFeedback(false), 2000);
+      } catch (err) {
+        console.error("Fallback copy failed:", err);
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
+  const handleExpand = () => {
+    setIsExpanded(!isExpanded);
+  };
+
   return (
     <div className={`${styles.ideaCard} ${cardClass}`}>
       <div className={styles.cardHeader}>
@@ -115,38 +146,50 @@ function IdeaCard({ idea, platform, displayPlatform }: IdeaCardProps) {
         <p className={styles.ideaDescription}>{idea.description}</p>
       </div>
       
-      <div className={styles.section}>
-        <p className={styles.sectionLabel}>Angle</p>
-        <p className={styles.sectionText}>{idea.angle}</p>
-      </div>
-      
-      <div className={styles.section}>
-        <p className={styles.sectionLabel}>Linked Trend & Citation</p>
-        <p className={styles.trendReference}>{idea.trendReference}</p>
-        <p className={styles.trendReferenceNote}>This idea is based on the approved research trend above</p>
-      </div>
-      
-      {idea.variants && idea.variants.length > 0 && (
-        <div className={styles.section}>
-          <p className={styles.sectionLabel}>Variants</p>
-          <ul className={styles.variantsList}>
-            {idea.variants.map((variant, idx) => (
-              <li key={idx} className={styles.variantItem}>
-                <span className={styles.variantArrow}>→</span>
-                <span>{variant}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {isExpanded && (
+        <>
+          <div className={styles.section}>
+            <p className={styles.sectionLabel}>Angle</p>
+            <p className={styles.sectionText}>{idea.angle}</p>
+          </div>
+          
+          <div className={styles.section}>
+            <p className={styles.sectionLabel}>Linked Trend & Citation</p>
+            <p className={styles.trendReference}>{idea.trendReference}</p>
+            <p className={styles.trendReferenceNote}>This idea is based on the approved research trend above</p>
+          </div>
+          
+          {idea.variants && idea.variants.length > 0 && (
+            <div className={styles.section}>
+              <p className={styles.sectionLabel}>Variants</p>
+              <ul className={styles.variantsList}>
+                {idea.variants.map((variant, idx) => (
+                  <li key={idx} className={styles.variantItem}>
+                    <span className={styles.variantArrow}>→</span>
+                    <span>{variant}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
       
       <div className={styles.cardActions}>
-        <button className={styles.actionButton}>
-          Copy Hook
+        <button 
+          className={styles.actionButton}
+          onClick={handleCopyHook}
+          title="Copy hook to clipboard"
+        >
+          {copyFeedback ? "✓ Copied!" : "Copy Hook"}
         </button>
         <span className={styles.actionDivider}>|</span>
-        <button className={styles.actionButton}>
-          Expand
+        <button 
+          className={styles.actionButton}
+          onClick={handleExpand}
+          title={isExpanded ? "Collapse details" : "Expand details"}
+        >
+          {isExpanded ? "Collapse" : "Expand"}
         </button>
       </div>
     </div>

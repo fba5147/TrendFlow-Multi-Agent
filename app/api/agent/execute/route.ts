@@ -103,11 +103,11 @@ export async function POST(request: NextRequest) {
                   });
                 }
                 
-                // If trends exist, save them as research results (only high-confidence >= 70%)
+                // If trends exist, save them as research results (only high-confidence >= 65%)
                 if (state.trends && state.trends.length > 0) {
                   // Filter to only high-confidence trends before saving
                   const highConfidenceTrends = state.trends.filter(
-                    t => (t.confidence || 0) >= 0.7
+                    t => (t.confidence || 0) >= 0.65
                   );
                   if (highConfidenceTrends.length > 0) {
                     // Sort by confidence (descending - highest first) before saving
@@ -129,11 +129,11 @@ export async function POST(request: NextRequest) {
         }
       },
       onTrendUpdate: async (trends: any[]) => {
-        // Save research results incrementally (trends are already filtered to >= 70% in graph.ts)
+        // Save research results incrementally (trends are already filtered to >= 65% in graph.ts)
         if (trends.length > 0) {
           // Double-check: ensure only high-confidence trends are saved
           const highConfidenceTrends = trends.filter(
-            t => (t.confidence || 0) >= 0.7
+            t => (t.confidence || 0) >= 0.65
           );
           if (highConfidenceTrends.length > 0) {
             // Sort by confidence (descending - highest first) before saving

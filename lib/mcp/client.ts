@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { llm } from "../llm";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { GALLIUM_BRAND_PROMPT } from "../prompts";
+import { getGalliumAIBrandPrompt } from "../prompts";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import { createHash } from "crypto";
@@ -414,7 +414,8 @@ export async function fetchTrendsIncremental(
   query: string,
   timeWindow: string,
   onTrendFound?: (trend: any, allTrendsSoFar: any[]) => void | Promise<void>,
-  domain?: string
+  domain?: string,
+  persona?: string
 ): Promise<any[]> {
   console.log(`[MCP] Fetching trends incrementally for: ${query} (${timeWindow})`);
   
@@ -424,10 +425,15 @@ export async function fetchTrendsIncremental(
       const queryHash = generateQueryHash(query, timeWindow, domain);
       const cachedResult = await convex.query(api.queries.getCachedResearch, {
         queryHash,
+        query,
+        timeWindow,
+        domain: domain || query,
       });
       
       if (cachedResult && cachedResult.trends && cachedResult.trends.length > 0) {
-        console.log(`[MCP] ✓ Cache hit! Using cached results (age: ${Math.round(cachedResult.age / 1000 / 60)} minutes)`);
+        const matchType = cachedResult.matchType || "exact";
+        const similarity = cachedResult.similarity ? ` (${Math.round(cachedResult.similarity)}% similar)` : "";
+        console.log(`[MCP] ✓ Cache hit! Using cached results (${matchType}${similarity}, age: ${Math.round(cachedResult.age / 1000 / 60)} minutes)`);
         
         // Call onTrendFound for each cached trend to maintain streaming behavior
         if (onTrendFound) {
@@ -486,7 +492,8 @@ export async function fetchTrendsIncremental(
     }
     
     const confidence = calculateConfidence(result, timeWindow);
-    const whyItMatters = await generateWhyItMatters(cleanSnippet, query);
+    const userPersona = persona || "";
+    const whyItMatters = await generateWhyItMatters(cleanSnippet, query, userPersona);
     
     // Normalize timestamp: try multiple extraction methods, fallback to timeWindow-based estimate
     // Store original timestamp to check if we used it
@@ -588,9 +595,10 @@ export async function fetchTrendsIncremental(
 export async function fetchTrends(
   query: string,
   timeWindow: string,
-  domain?: string
+  domain?: string,
+  persona?: string
 ): Promise<any[]> {
-  return fetchTrendsIncremental(query, timeWindow, undefined, domain);
+  return fetchTrendsIncremental(query, timeWindow, undefined, domain, persona);
 }
 
 /**
@@ -740,47 +748,134 @@ function extractDateFromText(text: string): string | undefined {
 }
 
 /**
- * Use LLM to extract publication date from snippet/title if it contains date information
+ * Extract publication date from URL using API services
+ * Uses Microlink.io API (free tier) or direct HTML metadata parsing
  */
-async function extractDateWithLLM(snippet: string, title: string, url: string): Promise<string | undefined> {
+async function extractDateFromURLAPI(url: string): Promise<string | undefined> {
   try {
-    // Only try LLM if snippet/title seems to contain date information
-    const hasDateIndicators = /(?:published|posted|updated|created|released|date|time|ago|yesterday|today|week|month|year|\d{4}|\d{1,2}\/\d{1,2}\/\d{4})/i.test(snippet + " " + title);
-    if (!hasDateIndicators) {
-      return undefined; // Skip LLM call if no date indicators
+    // Method 1: Try Microlink.io API (free tier, no API key required for basic use)
+    try {
+      const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&fields=date,published`;
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      const response = await fetch(microlinkUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Try multiple date fields from Microlink response
+        const dateValue = data.data?.date || 
+                         data.data?.published || 
+                         data.data?.publishedTime ||
+                         data.data?.article?.publishedTime ||
+                         data.date ||
+                         data.published;
+        
+        if (dateValue) {
+          const date = new Date(dateValue);
+          if (!isNaN(date.getTime())) {
+            console.log(`[MCP] ✓ Extracted date from Microlink API: ${date.toISOString()}`);
+            return date.toISOString();
+          }
+        }
+      } else {
+        console.warn(`[MCP] Microlink API returned status ${response.status}, trying direct fetch`);
+      }
+    } catch (microlinkError) {
+      // Continue to next method if Microlink fails
+      if (microlinkError instanceof Error && microlinkError.name !== 'AbortError') {
+        console.warn(`[MCP] Microlink API failed, trying direct fetch:`, microlinkError.message);
+      }
     }
     
-    const systemPrompt = `Extract the publication date from the given text. Return ONLY a valid ISO 8601 date string (YYYY-MM-DD) or ISO timestamp (YYYY-MM-DDTHH:mm:ssZ). If no date can be determined, return null.`;
-    
-    const userMessage = `Extract the publication date from this text:
-
-Title: ${title}
-Snippet: ${snippet}
-URL: ${url}
-
-Return ONLY the date in ISO format (YYYY-MM-DD or ISO timestamp), or null if no date found.`;
-    
-    const messages = [
-      new SystemMessage(systemPrompt),
-      new HumanMessage(userMessage),
-    ];
-    
-    const response = await llm.invoke(messages);
-    const content = (response.content as string).trim().toLowerCase();
-    
-    // Check if response is "null" or indicates no date
-    if (content === 'null' || content === 'none' || content === 'n/a' || content.includes('no date')) {
-      return undefined;
-    }
-    
-    // Try to parse the response as a date
-    const date = new Date(content);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
+    // Method 2: Direct fetch and parse HTML metadata (fallback)
+    try {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; TrendResearchBot/1.0)',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+          // Skip if not HTML
+          return undefined;
+        }
+        
+        const html = await response.text();
+        
+        // Extract date from common meta tags
+        const metaPatterns = [
+          /<meta\s+property=["']article:published_time["']\s+content=["']([^"']+)["']/i,
+          /<meta\s+property=["']og:published_time["']\s+content=["']([^"']+)["']/i,
+          /<meta\s+name=["']published["']\s+content=["']([^"']+)["']/i,
+          /<meta\s+name=["']date["']\s+content=["']([^"']+)["']/i,
+          /<meta\s+name=["']pubdate["']\s+content=["']([^"']+)["']/i,
+          /<time\s+datetime=["']([^"']+)["']/i,
+          /<time\s+pubdate\s+datetime=["']([^"']+)["']/i,
+        ];
+        
+        for (const pattern of metaPatterns) {
+          const match = html.match(pattern);
+          if (match && match[1]) {
+            const date = new Date(match[1]);
+            if (!isNaN(date.getTime())) {
+              console.log(`[MCP] ✓ Extracted date from HTML metadata: ${date.toISOString()}`);
+              return date.toISOString();
+            }
+          }
+        }
+        
+        // Try JSON-LD structured data
+        const jsonLdPattern = /<script\s+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+        let jsonLdMatch;
+        while ((jsonLdMatch = jsonLdPattern.exec(html)) !== null) {
+          try {
+            const jsonLd = JSON.parse(jsonLdMatch[1]);
+            const dateValue = jsonLd.datePublished || 
+                            jsonLd.published || 
+                            jsonLd.datePublishedTime ||
+                            (jsonLd['@type'] === 'NewsArticle' && jsonLd.datePublished);
+            
+            if (dateValue) {
+              const date = new Date(dateValue);
+              if (!isNaN(date.getTime())) {
+                console.log(`[MCP] ✓ Extracted date from JSON-LD: ${date.toISOString()}`);
+                return date.toISOString();
+              }
+            }
+          } catch (e) {
+            // Continue to next JSON-LD block
+            continue;
+          }
+        }
+      }
+    } catch (fetchError) {
+      // Silently fail - direct fetch is best effort
+      console.warn(`[MCP] Direct fetch failed:`, fetchError);
     }
   } catch (error) {
-    // Silently fail - LLM extraction is best effort
-    console.warn(`[MCP] LLM date extraction failed:`, error);
+    // Silently fail - API extraction is best effort
+    console.warn(`[MCP] URL API date extraction failed:`, error);
   }
   return undefined;
 }
@@ -892,12 +987,12 @@ async function normalizeWebsiteTimestamp(
     }
   }
   
-  // Method 5: Use LLM to extract date from snippet/title (async, but we'll wait for it)
-  if (snippet && title && url) {
-    const llmDate = await extractDateWithLLM(snippet, title, url);
-    if (llmDate) {
-      console.log(`[MCP] ✓ Extracted date using LLM: ${llmDate}`);
-      return llmDate;
+  // Method 5: Use API to extract date from URL (async, but we'll wait for it)
+  if (url) {
+    const apiDate = await extractDateFromURLAPI(url);
+    if (apiDate) {
+      console.log(`[MCP] ✓ Extracted date using URL API: ${apiDate}`);
+      return apiDate;
     }
   }
   
@@ -946,15 +1041,15 @@ async function normalizeWebsiteTimestamp(
 /**
  * Generate "why it matters" explanation using the main agent LLM
  */
-async function generateWhyItMatters(snippet: string, query: string): Promise<string> {
+async function generateWhyItMatters(snippet: string, query: string, persona: string = ""): Promise<string> {
   try {
-    const systemPrompt = `${GALLIUM_BRAND_PROMPT}
+    const systemPrompt = `${getGalliumAIBrandPrompt(persona)}
 
 You are analyzing a trend snippet and generating a concise "why it matters" explanation.
 
 Requirements:
 - 1-2 sentences maximum
-- Sharp, opinionated, no corporate fluff (Gallium voice)
+- Sharp, opinionated, no corporate fluff (Gallium AI voice)
 - Focus on why this matters RIGHT NOW for marketers/growth teams
 - Be concrete and actionable`;
 
@@ -962,7 +1057,7 @@ Requirements:
 
 Snippet: "${snippet}"
 
-Generate a concise explanation (1-2 sentences) in Gallium's voice: sharp, opinionated, no fluff.`;
+Generate a concise explanation (1-2 sentences) in Gallium AI's voice: sharp, opinionated, no fluff.`;
 
     const messages = [
       new SystemMessage(systemPrompt),

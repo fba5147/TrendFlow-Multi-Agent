@@ -144,11 +144,11 @@ export async function executeAgent(
       }
       
       // Handle trend updates (when trends are added/updated)
-      // Filter to only high-confidence trends (>= 70%) before sending to frontend
+      // Filter to only high-confidence trends (>= 65%) before sending to frontend
       const allTrends = finalState.trends;
       if (allTrends && allTrends.length > 0) {
         const highConfidenceTrends = allTrends.filter(
-          t => (t.confidence || 0) >= 0.7
+          t => (t.confidence || 0) >= 0.65
         );
         if (highConfidenceTrends.length > 0 && callbacks?.onTrendUpdate) {
           callbacks.onTrendUpdate(highConfidenceTrends);

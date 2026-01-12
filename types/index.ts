@@ -44,6 +44,7 @@ export interface IdeaCardProps {
 
 export interface ContentIdeasPanelProps {
   conversationId: string | null;
+  currentStep?: Step;
 }
 
 export interface ChatInputProps {

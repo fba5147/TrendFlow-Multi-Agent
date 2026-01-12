@@ -8,7 +8,7 @@ import styles from "./sidebar.module.css";
 import type { ContentIdeasPanelProps, ContentIdeaDocument } from "@/types";
 import { contentIdeasToMarkdown, downloadMarkdown, getDisplayPlatform } from "@/utils";
 
-export default function ContentIdeasPanel({ conversationId }: ContentIdeasPanelProps) {
+export default function ContentIdeasPanel({ conversationId, currentStep = "idle" }: ContentIdeasPanelProps) {
   const contentIdeas = useQuery(
     api.queries.getContentIdeas,
     conversationId ? { conversationId: conversationId as any } : "skip"
@@ -40,12 +40,14 @@ export default function ContentIdeasPanel({ conversationId }: ContentIdeasPanelP
     return { byPlatform: grouped, sortedPlatforms: sorted };
   }, [contentIdeas]);
 
+  const isComplete = currentStep === "complete";
+  
   const handleExport = useCallback(() => {
-    if (!contentIdeas) return;
+    if (!contentIdeas || !isComplete) return;
     const markdown = contentIdeasToMarkdown(contentIdeas);
     const filename = `content-ideas-${new Date().toISOString().split('T')[0]}.md`;
     downloadMarkdown(markdown, filename);
-  }, [contentIdeas]);
+  }, [contentIdeas, isComplete]);
 
   // Early returns after all hooks
   if (!conversationId) {
@@ -95,7 +97,8 @@ export default function ContentIdeasPanel({ conversationId }: ContentIdeasPanelP
           <button 
             onClick={handleExport}
             className={styles.exportButton}
-            title="Export to Markdown"
+            disabled={!isComplete}
+            title={isComplete ? "Export to Markdown" : "Wait for generation to complete"}
           >
             Export
           </button>

@@ -99,7 +99,7 @@ Visit [http://localhost:3000](http://localhost:3000)
 - ✅ **HITL Checkpoints** - Human-in-the-loop approval with refine/restart options
 - ✅ **Streaming UX** - Real-time updates throughout the workflow
 - ✅ **Content Generation** - Platform-specific ideas (LinkedIn, X/Twitter, TikTok, Instagram)
-- ✅ **Brand Context** - Gallium brand voice integrated into all prompts
+- ✅ **Brand Context** - Gallium AI brand voice integrated into all prompts
 - ✅ **Error Handling** - Robust JSON parsing and error recovery
 - ✅ **TypeScript** - Full type safety throughout
 - ✅ **Tailwind CSS** - Modern, responsive UI

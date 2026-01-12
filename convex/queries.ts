@@ -58,27 +58,113 @@ export const getExecutionState = query({
 
 export const getCachedResearch = query({
   args: { 
-    queryHash: v.string(),
+    queryHash: v.optional(v.string()),
+    query: v.optional(v.string()),
+    timeWindow: v.optional(v.string()),
+    domain: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     
-    // Find cache entry by query hash
-    const cacheEntry = await ctx.db
-      .query("researchCache")
-      .withIndex("queryHash", (q) =>
-        q.eq("queryHash", args.queryHash)
-      )
-      .first();
+    // First, try exact hash match (fastest)
+    if (args.queryHash) {
+      const hashMatch = await ctx.db
+        .query("researchCache")
+        .withIndex("queryHash", (q) =>
+          q.eq("queryHash", args.queryHash || "")
+        )
+        .first();
+      
+      if (hashMatch && hashMatch.expiresAt > now) {
+        return {
+          trends: hashMatch.trends,
+          cached: true,
+          age: now - hashMatch.createdAt,
+          expiresAt: hashMatch.expiresAt,
+          matchType: "exact_hash",
+        };
+      }
+    }
     
-    // Check if cache is still valid (not expired)
-    if (cacheEntry && cacheEntry.expiresAt > now) {
-      return {
-        trends: cacheEntry.trends,
-        cached: true,
-        age: now - cacheEntry.createdAt,
-        expiresAt: cacheEntry.expiresAt,
-      };
+    // If no hash match, search by domain and timeWindow for similar queries
+    if (args.domain && args.timeWindow) {
+      const domainMatches = await ctx.db
+        .query("researchCache")
+        .withIndex("domain", (q) =>
+          q.eq("domain", args.domain || "")
+        )
+        .collect();
+      
+      // Filter by timeWindow and not expired
+      const validMatches = domainMatches.filter(
+        (entry) => entry.timeWindow === args.timeWindow && entry.expiresAt > now
+      );
+      
+      // If we have a query, try to find similar queries
+      if (args.query && validMatches.length > 0) {
+        const normalizedQuery = args.query.toLowerCase().trim();
+        
+        // Find best match by query similarity
+        let bestMatch = null;
+        let bestScore = 0;
+        
+        for (const entry of validMatches) {
+          const normalizedEntryQuery = entry.query.toLowerCase().trim();
+          
+          // Calculate similarity score
+          let score = 0;
+          
+          // Exact match
+          if (normalizedQuery === normalizedEntryQuery) {
+            score = 100;
+          } 
+          // Contains match (one contains the other)
+          else if (normalizedQuery.includes(normalizedEntryQuery) || normalizedEntryQuery.includes(normalizedQuery)) {
+            const shorter = Math.min(normalizedQuery.length, normalizedEntryQuery.length);
+            const longer = Math.max(normalizedQuery.length, normalizedEntryQuery.length);
+            score = (shorter / longer) * 80; // Up to 80% for contains match
+          }
+          // Word overlap
+          else {
+            const queryWords = new Set(normalizedQuery.split(/\s+/));
+            const entryWords = new Set(normalizedEntryQuery.split(/\s+/));
+            const intersection = new Set([...queryWords].filter(x => entryWords.has(x)));
+            const union = new Set([...queryWords, ...entryWords]);
+            score = (intersection.size / union.size) * 60; // Up to 60% for word overlap
+          }
+          
+          if (score > bestScore && score >= 50) { // Minimum 50% similarity
+            bestScore = score;
+            bestMatch = entry;
+          }
+        }
+        
+        if (bestMatch) {
+          return {
+            trends: bestMatch.trends,
+            cached: true,
+            age: now - bestMatch.createdAt,
+            expiresAt: bestMatch.expiresAt,
+            matchType: "similar_query",
+            similarity: bestScore,
+          };
+        }
+      }
+      
+      // If no similar query match, but we have valid domain/timeWindow matches, return the most recent one
+      if (validMatches.length > 0) {
+        const mostRecent = validMatches.reduce((latest, current) => 
+          current.createdAt > latest.createdAt ? current : latest
+        );
+        
+        return {
+          trends: mostRecent.trends,
+          cached: true,
+          age: now - mostRecent.createdAt,
+          expiresAt: mostRecent.expiresAt,
+          matchType: "domain_timewindow",
+        };
+      }
     }
     
     // Cache expired or not found

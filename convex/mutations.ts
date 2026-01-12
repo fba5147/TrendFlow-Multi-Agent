@@ -321,20 +321,86 @@ export const saveResearchCache = mutation({
     const now = Date.now();
     const expiresAt = now + args.cacheTTL;
     
-    // Check if cache entry already exists
-    const existing = await ctx.db
+    // First, check for exact hash match
+    let existing = await ctx.db
       .query("researchCache")
       .withIndex("queryHash", (q) =>
         q.eq("queryHash", args.queryHash)
       )
       .first();
     
+    // If no exact match, look for similar entries by domain and timeWindow
+    if (!existing && args.domain && args.timeWindow) {
+      const domainMatches = await ctx.db
+        .query("researchCache")
+        .withIndex("domain", (q) =>
+          q.eq("domain", args.domain)
+        )
+        .collect();
+      
+      // Filter by timeWindow
+      const timeWindowMatches = domainMatches.filter(
+        (entry) => entry.timeWindow === args.timeWindow
+      );
+      
+      // Check for similar queries
+      if (timeWindowMatches.length > 0) {
+        const normalizedQuery = args.query.toLowerCase().trim();
+        
+        // Find best matching entry
+        let bestMatch = null;
+        let bestScore = 0;
+        
+        for (const entry of timeWindowMatches) {
+          const normalizedEntryQuery = entry.query.toLowerCase().trim();
+          
+          // Calculate similarity
+          let score = 0;
+          
+          if (normalizedQuery === normalizedEntryQuery) {
+            score = 100; // Exact match
+          } else if (normalizedQuery.includes(normalizedEntryQuery) || normalizedEntryQuery.includes(normalizedQuery)) {
+            const shorter = Math.min(normalizedQuery.length, normalizedEntryQuery.length);
+            const longer = Math.max(normalizedQuery.length, normalizedEntryQuery.length);
+            score = (shorter / longer) * 90; // High score for contains match
+          } else {
+            // Word overlap
+            const queryWords = new Set(normalizedQuery.split(/\s+/));
+            const entryWords = new Set(normalizedEntryQuery.split(/\s+/));
+            const intersection = new Set([...queryWords].filter(x => entryWords.has(x)));
+            const union = new Set([...queryWords, ...entryWords]);
+            score = (intersection.size / union.size) * 70;
+          }
+          
+          // Also check trend similarity (same URLs indicate same research)
+          const newTrendUrls = new Set(args.trends.flatMap(t => t.sources.map(s => s.url)));
+          const existingTrendUrls = new Set(entry.trends.flatMap(t => t.sources.map(s => s.url)));
+          const urlIntersection = new Set([...newTrendUrls].filter(x => existingTrendUrls.has(x)));
+          const urlUnion = new Set([...newTrendUrls, ...existingTrendUrls]);
+          const trendSimilarity = urlUnion.size > 0 ? (urlIntersection.size / urlUnion.size) * 30 : 0;
+          
+          const totalScore = score + trendSimilarity;
+          
+          if (totalScore > bestScore && totalScore >= 60) { // Minimum 60% similarity to update
+            bestScore = totalScore;
+            bestMatch = entry;
+          }
+        }
+        
+        if (bestMatch) {
+          existing = bestMatch;
+        }
+      }
+    }
+    
     if (existing) {
-      // Update existing cache entry
+      // Update existing cache entry (rewrite with new data)
       await ctx.db.patch(existing._id, {
-        trends: args.trends,
+        queryHash: args.queryHash, // Update hash in case query changed slightly
+        query: args.query, // Update query text
+        trends: args.trends, // Update trends
         cacheTTL: args.cacheTTL,
-        createdAt: now,
+        createdAt: now, // Reset creation time
         expiresAt: expiresAt,
       });
     } else {

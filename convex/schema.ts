@@ -135,6 +135,8 @@ export default defineSchema({
     expiresAt: v.number(), // createdAt + cacheTTL
   })
     .index("queryHash", ["queryHash"])
+    .index("domain", ["domain"])
+    .index("timeWindow", ["timeWindow"])
     .index("expiresAt", ["expiresAt"]),
 });
 

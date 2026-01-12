@@ -13,28 +13,35 @@
 }
 
 .researchTitle {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
 }
 
 .trendCount {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: #d1d5db;
+  font-weight: 500;
 }
 
 .trendCard {
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  background-color: white;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  transition: box-shadow 0.2s;
+  gap: 0.875rem;
+  transition: all 0.3s ease;
 }
 
 .trendCard:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
 }
 
 .trendHeader {
@@ -48,6 +55,7 @@
   font-size: 1.125rem;
   font-weight: 600;
   flex: 1;
+  color: #f3f4f6;
 }
 
 .confidenceContainer {
@@ -59,7 +67,7 @@
 .confidenceLabel {
   font-size: 0.75rem;
   font-weight: 500;
-  color: #6b7280;
+  color: #d1d5db;
 }
 
 .confidenceBadge {
@@ -85,32 +93,36 @@
 }
 
 .trendSummary {
-  color: #374151;
+  color: #e5e7eb;
   line-height: 1.625;
+  font-size: 0.9375rem;
 }
 
 .whyItMatters {
-  background-color: #eff6ff;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
   border-left: 4px solid #3b82f6;
-  padding: 0.75rem;
-  border-radius: 0.25rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  backdrop-filter: blur(10px);
 }
 
 .whyItMattersLabel {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #1e3a8a;
-  margin-bottom: 0.25rem;
+  color: #93c5fd;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .whyItMattersText {
-  color: #1e40af;
-  font-size: 0.875rem;
+  color: #dbeafe;
+  font-size: 0.9375rem;
   line-height: 1.625;
 }
 
 .sourcesSection {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding-top: 0.75rem;
 }
 
@@ -124,12 +136,14 @@
 .sourcesLabel {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #374151;
+  color: #f3f4f6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .sourcesHint {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: #d1d5db;
 }
 
 .sourcesList {
@@ -139,15 +153,18 @@
 }
 
 .sourceItem {
-  background-color: #f9fafb;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid #e5e7eb;
-  transition: border-color 0.2s;
+  padding: 0.875rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
 }
 
 .sourceItem:hover {
-  border-color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateX(4px);
 }
 
 .sourceContent {
@@ -165,13 +182,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 9999px;
-  background-color: #dbeafe;
-  color: #1e40af;
-  font-size: 0.75rem;
-  font-weight: 600;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.3) 0%, rgba(99, 102, 241, 0.3) 100%);
+  color: #93c5fd;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .sourceDetails {
@@ -180,17 +198,18 @@
 }
 
 .sourceLink {
-  color: #2563eb;
+  color: #60a5fa;
   font-weight: 500;
   font-size: 0.875rem;
   word-break: break-all;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  transition: color 0.2s ease;
 }
 
 .sourceLink:hover {
-  color: #1e40af;
+  color: #93c5fd;
   text-decoration: underline;
 }
 
@@ -205,8 +224,8 @@
 }
 
 .sourceSnippet {
-  font-size: 0.75rem;
-  color: #4b5563;
+  font-size: 0.8125rem;
+  color: #d1d5db;
   margin-top: 0.5rem;
   font-style: italic;
   line-height: 1.5;
@@ -234,7 +253,7 @@
 }
 
 .sourceDateOld {
-  color: #6b7280;
+  color: #d1d5db;
 }
 
 .sourceRelativeTime {
@@ -245,6 +264,6 @@
 .emptyResearch {
   text-align: center;
   padding: 2rem 0;
-  color: #6b7280;
+  color: #d1d5db;
 }
 

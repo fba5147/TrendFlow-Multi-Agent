@@ -46,7 +46,7 @@ export default function ChatContainer() {
       {/* Main Chat Area */}
       <div className={styles.mainChatArea}>
         <div className={styles.chatHeader}>
-          <h1 className={styles.chatTitle}>Trend-to-Idea Agent | Gallium</h1>
+          <h1 className={styles.chatTitle}>Trend-to-Idea Agent | Gallium AI</h1>
           <StepIndicator 
             step={currentStep as Step} 
             executionState={executionStateForStepIndicator} 
@@ -66,7 +66,7 @@ export default function ChatContainer() {
       </div>
 
       {/* Sidebar for Content Ideas */}
-      <ContentIdeasPanel conversationId={conversationId} />
+      <ContentIdeasPanel conversationId={conversationId} currentStep={currentStep as Step} />
     </div>
   );
 }

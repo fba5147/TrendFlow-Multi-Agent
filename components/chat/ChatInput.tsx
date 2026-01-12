@@ -18,34 +18,16 @@ const DEFAULT_PERSONAS = [
 export default function ChatInput({ onNewConversation, onStepChange }: ChatInputProps) {
   const [query, setQuery] = useState("");
   const [persona, setPersona] = useState<string>(DEFAULT_PERSONAS[0]);
-  const [customPersona, setCustomPersona] = useState("");
-  const [showCustomPersona, setShowCustomPersona] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const createConversation = useMutation(api.mutations.createConversation);
 
   const handlePersonaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    if (value === "custom") {
-      setShowCustomPersona(true);
-    } else {
-      setShowCustomPersona(false);
-      setPersona(value);
-    }
-  };
-
-  const handleCustomPersonaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setCustomPersona(value);
+    setPersona(e.target.value);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isLoading) return;
-
-    // Use custom persona if shown and filled, otherwise use selected persona
-    const finalPersona = showCustomPersona && customPersona.trim() 
-      ? customPersona.trim() 
-      : persona;
 
     setIsLoading(true);
     onStepChange("planning");
@@ -55,7 +37,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
       const conversationId = await createConversation({
         userId: "user-1", // TODO: Get from auth
         userQuery: query,
-        userPersona: finalPersona || undefined,
+        userPersona: persona || undefined,
       });
 
       onNewConversation(conversationId);
@@ -66,7 +48,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userQuery: query,
-          userPersona: finalPersona || undefined,
+          userPersona: persona || undefined,
           conversationId,
         }),
       });
@@ -97,7 +79,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
         </label>
         <select
           id="persona-select"
-          value={showCustomPersona ? "custom" : persona}
+          value={persona}
           onChange={handlePersonaChange}
           className={styles.personaSelect}
           disabled={isLoading}
@@ -107,18 +89,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
               {p}
             </option>
           ))}
-          <option value="custom">Custom...</option>
         </select>
-        {showCustomPersona && (
-          <input
-            type="text"
-            value={customPersona}
-            onChange={handleCustomPersonaChange}
-            placeholder="Enter your persona (e.g., CMO at enterprise SaaS)"
-            className={styles.customPersonaInput}
-            disabled={isLoading}
-          />
-        )}
       </div>
       <form onSubmit={handleSubmit} className={styles.chatForm}>
         <input

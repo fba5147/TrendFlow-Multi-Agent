@@ -6,7 +6,7 @@ import { ConvexClientProvider } from "@/components/providers/ConvexProvider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Trend-to-Idea Agent | Gallium",
+  title: "Trend-to-Idea Agent | Gallium AI",
   description: "AI-native agentic system for researching trends and generating content ideas",
 };
 
