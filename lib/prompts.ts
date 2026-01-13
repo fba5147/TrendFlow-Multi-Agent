@@ -187,6 +187,17 @@ User persona: ${persona}`,
 - Engagement: Encourage views, replies, shares
 
 User persona: ${persona}`,
+
+    Discord: `Discord Content Guidelines:
+- Community-focused and conversational
+- Channel-appropriate content (text, voice, or video)
+- Value-driven messages that spark discussion
+- Formats: Text posts, announcements, thread discussions, voice channel topics, video content
+- Tone: Helpful, authentic, community-oriented, engaging
+- Engagement: Encourage reactions, replies, thread participation, voice channel engagement
+- Best practices: Use clear formatting, emojis strategically, create discussion threads, provide actionable insights
+
+User persona: ${persona}`,
   };
 
   // If platform is found in prompts, use it; otherwise generate a generic prompt

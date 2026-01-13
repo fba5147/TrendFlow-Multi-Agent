@@ -23,7 +23,7 @@ You are a research planning assistant for Gallium AI. Analyze the user's query a
 5. Platforms for content generation (e.g., ["LinkedIn", "X", "TikTok"]) - REQUIRED, must be an array of platform names
 
 Platforms should be extracted from the user's query. Look for mentions of social media platforms like:
-- LinkedIn, X (or Twitter), TikTok, Instagram, YouTube, Reddit, Facebook, Medium, Substack, Threads, Pinterest, Snapchat
+- LinkedIn, X (or Twitter), TikTok, Instagram, YouTube, Reddit, Facebook, Medium, Substack, Threads, Pinterest, Snapchat, Discord
 
 If platforms are not explicitly mentioned, infer them from context (e.g., "professional network" → LinkedIn, "short videos" → TikTok).
 If no platforms are mentioned or can be inferred, default to ["LinkedIn", "X"] (the most common platforms).
@@ -127,7 +127,7 @@ Response: { "timeWindow": "this week", "region": null, "domain": "creator econom
     if (!planData.platforms || !Array.isArray(planData.platforms) || planData.platforms.length === 0) {
       // Try to extract platforms from user query
       const platformNames = ["LinkedIn", "X", "Twitter", "TikTok", "Instagram", "YouTube", "Reddit", 
-                            "Facebook", "Medium", "Substack", "Threads", "Pinterest", "Snapchat"];
+                            "Facebook", "Medium", "Substack", "Threads", "Pinterest", "Snapchat", "Discord"];
       const extractedPlatforms: string[] = [];
       
       const lowerQuery = queryText.toLowerCase();
@@ -146,7 +146,8 @@ Response: { "timeWindow": "this week", "region": null, "domain": "creator econom
             (platform === "Substack" && lowerQuery.includes("substack")) ||
             (platform === "Threads" && lowerQuery.includes("threads")) ||
             (platform === "Pinterest" && lowerQuery.includes("pinterest")) ||
-            (platform === "Snapchat" && lowerQuery.includes("snapchat"))) {
+            (platform === "Snapchat" && lowerQuery.includes("snapchat")) ||
+            (platform === "Discord" && lowerQuery.includes("discord"))) {
           // Normalize platform name
           const normalized = platform === "Twitter" ? "X" : platform;
           if (!extractedPlatforms.includes(normalized)) {
@@ -198,7 +199,7 @@ Response: { "timeWindow": "this week", "region": null, "domain": "creator econom
     
     // Extract platforms from query in fallback
     const platformNames = ["LinkedIn", "X", "Twitter", "TikTok", "Instagram", "YouTube", "Reddit", 
-                          "Facebook", "Medium", "Substack", "Threads", "Pinterest", "Snapchat"];
+                          "Facebook", "Medium", "Substack", "Threads", "Pinterest", "Snapchat", "Discord"];
     const extractedPlatforms: string[] = [];
     const lowerQuery = queryText.toLowerCase();
     
@@ -206,7 +207,8 @@ Response: { "timeWindow": "this week", "region": null, "domain": "creator econom
       const lowerPlatform = platform.toLowerCase();
       if (lowerQuery.includes(lowerPlatform) || 
           (platform === "X" && (lowerQuery.includes("twitter") || lowerQuery.includes(" x "))) ||
-          (platform === "LinkedIn" && (lowerQuery.includes("linkedin") || lowerQuery.includes("linked in")))) {
+          (platform === "LinkedIn" && (lowerQuery.includes("linkedin") || lowerQuery.includes("linked in"))) ||
+          (platform === "Discord" && lowerQuery.includes("discord"))) {
         const normalized = platform === "Twitter" ? "X" : platform;
         if (!extractedPlatforms.includes(normalized)) {
           extractedPlatforms.push(normalized);
@@ -1048,6 +1050,7 @@ For EACH content idea, you MUST provide ALL of the following fields:
    - X: "X thread (5-7 tweets)", "Single tweet (under 280 chars)", "Quote tweet"
    - TikTok: "TikTok script (30-60s)", "TikTok hook + concept"
    - Instagram: "Instagram Reel (15-90s)", "Carousel post (5-10 slides)", "Instagram Story sequence"
+   - Discord: "Discord announcement", "Text post", "Thread discussion", "Voice channel topic"
 
 3. angle: Why this will work for ${persona}
    - Reference specific data, insights, or patterns from the trend

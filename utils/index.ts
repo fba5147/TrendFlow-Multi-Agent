@@ -19,6 +19,7 @@ export const MAIN_PLATFORMS = [
   "Threads",
   "Pinterest",
   "Snapchat",
+  "Discord",
 ] as const;
 
 /**
@@ -199,6 +200,8 @@ export function normalizePlatformName(platform: string): string {
     'pinterest': 'Pinterest',
     'pin.it': 'Pinterest',
     'snapchat': 'Snapchat',
+    'discord': 'Discord',
+    'discord.com': 'Discord',
   };
   
   // Check exact match first
