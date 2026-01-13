@@ -859,17 +859,19 @@ IMPORTANT: Only return trends that match the titles provided above. Do not creat
           }
         }
         
+        const finalConfidence = typeof ranked.confidence === 'number' && ranked.confidence >= 0 && ranked.confidence <= 1 
+          ? ranked.confidence 
+          : Math.max(0, Math.min(1, original.confidence || 0.5)); // Clamp confidence to 0-1
+        
         return {
           title: ranked.title || original.title,
           summary: (ranked.summary || original.summary).substring(0, 250).trim(), // Limit summary length
           whyItMatters: (ranked.whyItMatters || original.whyItMatters || "This trend is significant for marketing teams.").substring(0, 300).trim(), // Limit length
           sources: mergedSources, // Use merged sources (multiple when available)
-          confidence: typeof ranked.confidence === 'number' && ranked.confidence >= 0 && ranked.confidence <= 1 
-            ? ranked.confidence 
-            : Math.max(0, Math.min(1, original.confidence || 0.5)), // Clamp confidence to 0-1
+          confidence: Math.max(0.65, finalConfidence), // Ensure minimum 0.65 confidence (high-confidence threshold)
         };
       })
-      .filter((t): t is Trend => t !== null && t !== undefined && !!t?.title && !!t?.summary);
+      .filter((t): t is Trend => t !== null && t !== undefined && !!t?.title && !!t?.summary && (t.confidence || 0) >= 0.65); // Filter out trends below 0.65 confidence
 
     // Final deduplication pass to ensure no duplicates in synthesized results
     const finalSynthesizedTrends = deduplicateTrends(synthesizedTrends);
@@ -878,7 +880,15 @@ IMPORTANT: Only return trends that match the titles provided above. Do not creat
       console.log(`[Synthesis] Removed ${synthesizedTrends.length - finalSynthesizedTrends.length} duplicate trend(s) from synthesis results`);
     }
 
-    console.log(`[Synthesis] Processed ${finalSynthesizedTrends.length} unique trend${finalSynthesizedTrends.length !== 1 ? 's' : ''} from ${state.trends.length} original trend${state.trends.length !== 1 ? 's' : ''}`);
+    // Final confidence check - ensure all trends meet the 0.65 threshold
+    const highConfidenceFinalTrends = finalSynthesizedTrends.filter(t => (t.confidence || 0) >= 0.65);
+    if (highConfidenceFinalTrends.length < finalSynthesizedTrends.length) {
+      console.warn(`[Synthesis] ⚠ Filtered out ${finalSynthesizedTrends.length - highConfidenceFinalTrends.length} trend(s) with confidence < 0.65 after deduplication`);
+      finalSynthesizedTrends.length = 0;
+      finalSynthesizedTrends.push(...highConfidenceFinalTrends);
+    }
+
+    console.log(`[Synthesis] Processed ${finalSynthesizedTrends.length} unique high-confidence trend${finalSynthesizedTrends.length !== 1 ? 's' : ''} (>= 65%) from ${state.trends.length} original trend${state.trends.length !== 1 ? 's' : ''}`);
     console.log(`[Synthesis] Returning ${finalSynthesizedTrends.length} unique trend${finalSynthesizedTrends.length !== 1 ? 's' : ''} and moving to checkpoint`);
 
     // Return synthesis results - checkpoint node will set checkpointStatus
@@ -899,8 +909,10 @@ IMPORTANT: Only return trends that match the titles provided above. Do not creat
     console.error("[Synthesis] Error:", error);
     // Fallback: use original trends sorted by confidence, but deduplicate first
     const uniqueTrends = deduplicateTrends(state.trends);
-    const sortedTrends = uniqueTrends.sort((a, b) => b.confidence - a.confidence);
-    const trendsToReturn = sortedTrends.slice(0, Math.min(uniqueTrends.length, 10));
+    // Filter to only high-confidence trends (>= 0.65) in fallback as well
+    const highConfidenceTrends = uniqueTrends.filter(t => (t.confidence || 0) >= 0.65);
+    const sortedTrends = highConfidenceTrends.sort((a, b) => b.confidence - a.confidence);
+    const trendsToReturn = sortedTrends.slice(0, Math.min(sortedTrends.length, 10));
     return {
       trends: trendsToReturn,
       researchComplete: true,
