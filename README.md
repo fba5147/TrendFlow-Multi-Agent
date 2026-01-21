@@ -106,3 +106,5 @@ lib/                   # Business logic
 - Real-time Convex subscriptions
 - Human-in-the-loop checkpoints
 - Platform-specific content generation (LinkedIn, X, TikTok, Instagram)
+
+Created as part of a hiring evaluation. Not licensed for commercial use.
