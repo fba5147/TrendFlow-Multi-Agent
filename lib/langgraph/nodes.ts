@@ -2,8 +2,45 @@ import { AgentState, Trend, ResearchPlan, ContentIdea } from "./state";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { fetchTrendsIncremental } from "../mcp/client";
 import { getGalliumAIBrandPrompt, getTrendSynthesisPrompt, getContentGenerationPrompt } from "../prompts";
-import { MAIN_PLATFORMS, normalizePlatformName } from "@/utils";
-import { llm } from "../llm";
+import { MAIN_PLATFORMS, normalizePlatformName } from "../../utils";
+import { llm, createLLM } from "../llm";
+import { registry, initializeRegistry } from "../../plugins/core/registry";
+import type { SourceResult } from "../../plugins/core/types";
+
+let _registryInit = false;
+function ensureRegistry() {
+  if (!_registryInit) { initializeRegistry(); _registryInit = true; }
+}
+
+async function convertSourceResultsToTrends(
+  results: SourceResult[],
+  domain: string,
+  timeWindow: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  llmInstance: any
+): Promise<Trend[]> {
+  if (results.length === 0) return [];
+  const resultsText = results
+    .map((r, i) => `${i + 1}. TITLE: ${r.title}\n   URL: ${r.url}\n   SNIPPET: ${r.snippet || "N/A"}\n   SOURCE: ${r.source}`)
+    .join("\n\n");
+
+  const response = await llmInstance.invoke([
+    new SystemMessage(`You are a trend analyst. Evaluate search results for relevance to "${domain}" in "${timeWindow}".`),
+    new HumanMessage(`Extract relevant trends from these results. Return ONLY a JSON array, each item: { "title": string, "summary": string, "whyItMatters": string, "sources": [{"url": string, "timestamp": string, "snippet": string}], "confidence": number (0-1) }. Skip results with confidence < 0.65. Return [] if none are relevant.\n\n${resultsText}`),
+  ]);
+
+  try {
+    const content = response.content as string;
+    const first = content.indexOf("[");
+    const last = content.lastIndexOf("]");
+    const parsed = JSON.parse(content.substring(first, last + 1));
+    return Array.isArray(parsed)
+      ? (parsed as Trend[]).filter((t) => t.title && (t.confidence || 0) >= 0.65)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Node 1: Research Planning
@@ -311,11 +348,34 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
   const onTrendFound = (state as unknown as StateWithCallbacks).__onTrendFound;
 
   try {
+    // Fetch from additional source plugins in parallel (beyond brave-search)
+    ensureRegistry();
+    const selectedSources = state.selectedSources?.length ? state.selectedSources : ["brave-search"];
+    const nodeLlm = state.llmProvider ? createLLM(state.llmProvider, state.llmModel) : llm;
+    const extraSources = selectedSources.filter((s) => s !== "brave-search");
+    let pluginTrends: Trend[] = [];
+
+    if (extraSources.length > 0) {
+      console.log(`[Trend Retrieval] Fetching from plugins: ${extraSources.join(", ")}`);
+      const pluginResults = await Promise.allSettled(
+        extraSources.map(async (sourceId) => {
+          const plugin = registry.getSource(sourceId);
+          if (!plugin?.isAvailable()) return [];
+          const results = await plugin.fetch({ domain: scope.domain, timeWindow: scope.timeWindow, region: scope.region });
+          return convertSourceResultsToTrends(results, scope.domain, scope.timeWindow, nodeLlm);
+        })
+      );
+      pluginTrends = pluginResults
+        .filter((r): r is PromiseFulfilledResult<Trend[]> => r.status === "fulfilled")
+        .flatMap((r) => r.value);
+      console.log(`[Trend Retrieval] Plugin sources yielded ${pluginTrends.length} trends`);
+    }
+
     // Target: 5-10 trends with confidence >= 0.65 (65%)
     const MIN_HIGH_CONFIDENCE_TRENDS = 5;
     const MAX_HIGH_CONFIDENCE_TRENDS = 10;
     const CONFIDENCE_THRESHOLD = 0.65;
-    
+
     // Generate base query variations
     const baseQueryVariations = [
       query, // Original query
@@ -343,7 +403,8 @@ export async function trendRetrievalNode(state: AgentState): Promise<Partial<Age
     console.log(`[Trend Retrieval] Will search until we have ${MIN_HIGH_CONFIDENCE_TRENDS}-${MAX_HIGH_CONFIDENCE_TRENDS} trends with confidence >= ${CONFIDENCE_THRESHOLD * 100}% OR reach 50 searches`);
     
     // Fetch trends using MCP incrementally, keep searching until we have enough high-confidence trends or reach 50 searches
-    let allTrends: Trend[] = [];
+    // Seed with any trends already found from additional source plugins
+    let allTrends: Trend[] = [...pluginTrends];
     let queryIndex = 0;
     const maxSearchAttempts = 50; // Maximum searches before reaching checkpoint
     let searchAttempts = 0;
@@ -1008,6 +1069,37 @@ export async function contentGenerationNode(state: AgentState): Promise<Partial<
   
   if (!state.approvedTrends || state.approvedTrends.length === 0) {
     throw new Error("No approved trends for content generation");
+  }
+
+  // --- Non-content-ideas output types (blog, newsletter, x-thread, linkedin-post) ---
+  const outputType = state.outputType || "content-ideas";
+  if (outputType !== "content-ideas") {
+    ensureRegistry();
+    const generator = registry.getGenerator(outputType);
+    if (!generator) {
+      return {
+        error: `Unknown output type: ${outputType}`,
+        step: "complete",
+        generationComplete: true,
+        messages: [...state.messages, { role: "assistant", content: `Unknown output type: ${outputType}`, timestamp: Date.now() }],
+      };
+    }
+    console.log(`[Content Generation] Using generator plugin: ${generator.id}`);
+    const generatedContent = await generator.generate(
+      state.approvedTrends,
+      { platforms: state.platforms, persona: state.userPersona, outputType: generator.outputType },
+      state.llmProvider,
+      state.llmModel,
+    );
+    return {
+      generatedContent,
+      generationComplete: true,
+      step: "complete",
+      messages: [
+        ...state.messages,
+        { role: "assistant", content: `Generated ${generator.name}: "${generatedContent.title || outputType}"`, timestamp: Date.now() },
+      ],
+    };
   }
 
   const platforms = (state.platforms || MAIN_PLATFORMS as unknown as string[]).map(p => normalizePlatformName(p));

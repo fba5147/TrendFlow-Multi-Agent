@@ -4,7 +4,7 @@ import { llm } from "../llm";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { getGalliumAIBrandPrompt } from "../prompts";
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import { createHash } from "crypto";
 
 // Initialize Convex client for caching (only if URL is available)
@@ -1066,10 +1066,10 @@ async function extractDateFromURLAPI(url: string): Promise<string | undefined> {
       clearTimeout(timeoutId);
       
       if (response.ok) {
-        const data = await response.json();
-        
+        const data = await response.json() as any;
+
         // Try multiple date fields from Microlink response
-        const dateValue = data.data?.date || 
+        const dateValue = data.data?.date ||
                          data.data?.published || 
                          data.data?.publishedTime ||
                          data.data?.article?.publishedTime ||

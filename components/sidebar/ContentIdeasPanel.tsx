@@ -1,12 +1,10 @@
-"use client";
-
 import { useQuery } from "convex/react";
 import { useMemo, useCallback } from "react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import IdeaCard from "./IdeaCard";
 import styles from "./sidebar.module.css";
-import type { ContentIdeasPanelProps, ContentIdeaDocument } from "@/types";
-import { contentIdeasToMarkdown, downloadMarkdown, getDisplayPlatform } from "@/utils";
+import type { ContentIdeasPanelProps, ContentIdeaDocument } from "../../types";
+import { contentIdeasToMarkdown, downloadMarkdown, getDisplayPlatform } from "../../utils";
 
 export default function ContentIdeasPanel({ conversationId, currentStep = "idle" }: ContentIdeasPanelProps) {
   const contentIdeas = useQuery(

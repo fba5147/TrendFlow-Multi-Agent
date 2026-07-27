@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { ContentOutputType, GeneratedContent } from "../../plugins/core/types";
+export type { ContentOutputType, GeneratedContent };
 
 // Trend data structure
 export const TrendSchema = z.object({
@@ -49,6 +51,12 @@ export interface AgentState {
   userPersona?: string;
   conversationId?: string;
 
+  // Plugin configuration
+  selectedSources?: string[];       // e.g. ["brave-search", "hacker-news", "github-trends"]
+  outputType?: ContentOutputType;   // default: "content-ideas"
+  llmProvider?: string;             // e.g. "groq" | "openai" | "anthropic"
+  llmModel?: string;                // model name override
+
   // Research phase
   researchPlan?: ResearchPlan;
   trends?: Trend[];
@@ -59,9 +67,13 @@ export interface AgentState {
   refinementRequest?: string;
   approvedTrends?: Trend[];
 
-  // Content generation
+  // Content generation — content-ideas output
   platforms?: string[];
   contentIdeas?: Record<string, ContentIdea[]>; // platform -> ideas
+
+  // Content generation — long-form output (blog, newsletter, x-thread, linkedin)
+  generatedContent?: GeneratedContent;
+
   generationComplete: boolean;
 
   // Metadata

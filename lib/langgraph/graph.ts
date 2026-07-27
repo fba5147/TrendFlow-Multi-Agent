@@ -1,5 +1,5 @@
 import { StateGraph, END, START, Annotation } from "@langchain/langgraph";
-import { AgentState, ResearchPlan, Trend, ContentIdea } from "./state";
+import { AgentState, ResearchPlan, Trend, ContentIdea, GeneratedContent, ContentOutputType } from "./state";
 import {
   researchPlanningNode,
   trendRetrievalNode,
@@ -7,7 +7,7 @@ import {
   hitlCheckpointNode,
   contentGenerationNode,
 } from "./nodes";
-import { normalizePlatformName } from "@/utils";
+import { normalizePlatformName } from "../../utils";
 
 /**
  * Extended state type for internal callbacks (not part of AgentState)
@@ -24,6 +24,10 @@ const graphState = Annotation.Root({
   userQuery: Annotation<string>(),
   userPersona: Annotation<string | undefined>(),
   conversationId: Annotation<string | undefined>(),
+  selectedSources: Annotation<string[] | undefined>(),
+  outputType: Annotation<ContentOutputType | undefined>(),
+  llmProvider: Annotation<string | undefined>(),
+  llmModel: Annotation<string | undefined>(),
   researchPlan: Annotation<ResearchPlan | undefined>(),
   trends: Annotation<Trend[] | undefined>(),
   researchComplete: Annotation<boolean>(),
@@ -32,6 +36,7 @@ const graphState = Annotation.Root({
   approvedTrends: Annotation<Trend[] | undefined>(),
   platforms: Annotation<string[] | undefined>(),
   contentIdeas: Annotation<Record<string, ContentIdea[]> | undefined>(),
+  generatedContent: Annotation<GeneratedContent | undefined>(),
   generationComplete: Annotation<boolean>(),
   step: Annotation<"planning" | "researching" | "synthesizing" | "checkpoint" | "generating" | "complete">(),
   error: Annotation<string | undefined>(),

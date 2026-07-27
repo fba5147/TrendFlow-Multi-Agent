@@ -1,11 +1,9 @@
-"use client";
-
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import styles from "./hitl.module.css";
-import type { HITLControlsProps } from "@/types";
-import { MAIN_PLATFORMS } from "@/utils";
+import type { HITLControlsProps } from "../../types";
+import { MAIN_PLATFORMS } from "../../utils";
 
 export default function HITLControls({ conversationId }: HITLControlsProps) {
   const [refinementText, setRefinementText] = useState("");

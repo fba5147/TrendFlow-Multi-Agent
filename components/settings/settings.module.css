@@ -1,0 +1,217 @@
+.wrapper {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.toggle:hover:not(:disabled) {
+  border-color: var(--accent, #6366f1);
+  color: var(--text, #eee);
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggleIcon {
+  font-size: 0.65rem;
+  opacity: 0.6;
+}
+
+.badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel {
+  border: 1px solid var(--border, #2a2a2a);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 1rem;
+  background: var(--bg-elevated, #111);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.section {}
+
+.sectionTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #888);
+  margin: 0 0 0.6rem 0;
+}
+
+/* Sources */
+.sourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.4rem;
+}
+
+.sourceCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 0.8rem;
+}
+
+.sourceCard:hover {
+  border-color: var(--accent, #6366f1);
+}
+
+.sourceCard.checked {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.sourceCard input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--accent, #6366f1);
+}
+
+.sourceInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sourceName {
+  font-weight: 500;
+  color: var(--text, #eee);
+}
+
+.sourceDesc {
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+.apiKeyBadge {
+  font-size: 0.65rem;
+  color: var(--warning, #f59e0b);
+  font-family: monospace;
+}
+
+/* Output types */
+.outputGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.4rem;
+}
+
+.outputCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 0.8rem;
+}
+
+.outputCard:hover {
+  border-color: var(--accent, #6366f1);
+}
+
+.outputCard.checked {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.outputCard input[type="radio"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--accent, #6366f1);
+}
+
+.outputInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.outputLabel {
+  font-weight: 500;
+  color: var(--text, #eee);
+}
+
+.outputDesc {
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+/* Model */
+.modelRow {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modelSelect {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 5px;
+  background: var(--bg, #000);
+  color: var(--text, #eee);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.modelInput {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 5px;
+  background: var(--bg, #000);
+  color: var(--text, #eee);
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+
+.modelInput:focus,
+.modelSelect:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1);
+}
+
+.modelHint {
+  margin: 0.4rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+.modelHint code {
+  font-family: monospace;
+  color: var(--warning, #f59e0b);
+}

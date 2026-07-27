@@ -1,11 +1,9 @@
-"use client";
-
 import { useQuery } from "convex/react";
 import { useMemo } from "react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import styles from "./stepIndicator.module.css";
-import type { StepIndicatorProps } from "@/types";
-import { normalizePlatformName } from "@/utils";
+import type { StepIndicatorProps } from "../../types";
+import { normalizePlatformName } from "../../utils";
 
 const stepLabels: Record<string, string> = {
   idle: "Ready",

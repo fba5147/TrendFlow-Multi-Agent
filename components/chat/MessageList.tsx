@@ -1,12 +1,10 @@
-"use client";
-
 import { useState, useEffect, useMemo, memo } from "react";
 import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import ResearchDisplay from "./ResearchDisplay";
 import HITLControls from "./HITLControls";
 import styles from "./chat.module.css";
-import type { MessageListProps } from "@/types";
+import type { MessageListProps } from "../../types";
 
 /**
  * Message item component - client-side only to avoid hydration issues with timestamps

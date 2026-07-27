@@ -1,10 +1,9 @@
-"use client";
-
 import { useState, useRef } from "react";
 import { useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import styles from "./chat.module.css";
-import type { ChatInputProps, Step } from "@/types";
+import type { ChatInputProps } from "../../types";
+import SettingsPanel, { AgentSettings, DEFAULT_SETTINGS } from "../settings/SettingsPanel";
 
 const DEFAULT_PERSONAS = [
   "Growth lead at a D2C brand",
@@ -18,39 +17,30 @@ const DEFAULT_PERSONAS = [
 export default function ChatInput({ onNewConversation, onStepChange }: ChatInputProps) {
   const [query, setQuery] = useState("");
   const [persona, setPersona] = useState<string>(DEFAULT_PERSONAS[0]);
+  const [settings, setSettings] = useState<AgentSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(false);
   const isSubmittingRef = useRef(false);
   const createConversation = useMutation(api.mutations.createConversation);
 
-  const handlePersonaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPersona(e.target.value);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Use ref for immediate synchronous check to prevent race conditions
-    if (!query.trim() || isSubmittingRef.current || isLoading) {
-      return;
-    }
 
-    // Set ref immediately (synchronous) to prevent duplicate submissions
+    if (!query.trim() || isSubmittingRef.current || isLoading) return;
+
     isSubmittingRef.current = true;
     setIsLoading(true);
     onStepChange("planning");
 
     try {
-      // Create conversation in Convex
       const conversationId = await createConversation({
-        userId: "user-1", // TODO: Get from auth
+        userId: "user-1",
         userQuery: query,
         userPersona: persona || undefined,
       });
 
       onNewConversation(conversationId);
 
-      // Trigger LangGraph execution via API route
       const response = await fetch("/api/agent/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,6 +48,10 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
           userQuery: query,
           userPersona: persona || undefined,
           conversationId,
+          selectedSources: settings.selectedSources,
+          outputType: settings.outputType,
+          llmProvider: settings.llmProvider,
+          llmModel: settings.llmModel,
         }),
       });
 
@@ -65,10 +59,7 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
         const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(errorData.error || "Failed to start agent execution");
       }
-      
-      const result = await response.json();
-      console.log("Agent execution started:", result);
-      
+
       setQuery("");
     } catch (error) {
       console.error("Error creating conversation:", error);
@@ -82,6 +73,8 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
 
   return (
     <div className={styles.chatInputContainer}>
+      <SettingsPanel settings={settings} onChange={setSettings} disabled={isLoading} />
+
       <div className={styles.personaSelector}>
         <label htmlFor="persona-select" className={styles.personaLabel}>
           Persona:
@@ -89,23 +82,22 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
         <select
           id="persona-select"
           value={persona}
-          onChange={handlePersonaChange}
+          onChange={(e) => setPersona(e.target.value)}
           className={styles.personaSelect}
           disabled={isLoading}
         >
           {DEFAULT_PERSONAS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
+            <option key={p} value={p}>{p}</option>
           ))}
         </select>
       </div>
+
       <form onSubmit={handleSubmit} className={styles.chatForm}>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Enter your query"
+          placeholder="What trends are you researching? (e.g. 'AI agents this week for LinkedIn')"
           className={styles.chatInput}
           disabled={isLoading}
           onKeyDown={(e) => {
@@ -120,10 +112,9 @@ export default function ChatInput({ onNewConversation, onStepChange }: ChatInput
           className={styles.submitButton}
           aria-busy={isLoading}
         >
-          {isLoading ? "Researching..." : "Start Research"}
+          {isLoading ? "Researching..." : "Research"}
         </button>
       </form>
     </div>
   );
 }
-

@@ -1,9 +1,7 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import styles from "./research.module.css";
-import type { ResearchDisplayProps, Trend } from "@/types";
-import { getRelativeTime, formatDate, isRecentDate } from "@/utils";
+import type { ResearchDisplayProps, Trend } from "../../types";
+import { getRelativeTime, formatDate, isRecentDate } from "../../utils";
 
 
 /**

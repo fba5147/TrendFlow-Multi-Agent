@@ -1,9 +1,7 @@
-"use client";
-
 import { memo, useMemo, useState } from "react";
 import styles from "./ideaCard.module.css";
-import type { IdeaCardProps } from "@/types";
-import { getDisplayPlatform } from "@/utils";
+import type { IdeaCardProps } from "../../types";
+import { getDisplayPlatform } from "../../utils";
 
 function IdeaCard({ idea, platform, displayPlatform }: IdeaCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);

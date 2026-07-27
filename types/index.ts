@@ -7,8 +7,8 @@
  */
 
 // Import core types for use in this file
-import type { Trend, ContentIdea } from "@/lib/langgraph/state";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Trend, ContentIdea } from "../lib/langgraph/state";
+import type { Id } from "../convex/_generated/dataModel";
 
 // Re-export core types from lib/langgraph/state.ts
 export type {
@@ -16,10 +16,10 @@ export type {
   ResearchPlan,
   ContentIdea,
   AgentState,
-} from "@/lib/langgraph/state";
+} from "../lib/langgraph/state";
 
 // Re-export Convex ID types
-export type { Id } from "@/convex/_generated/dataModel";
+export type { Id } from "../convex/_generated/dataModel";
 export type ConversationId = Id<"conversations">;
 
 // Content Idea Document Type (for Convex)

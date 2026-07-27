@@ -1,14 +1,12 @@
-"use client";
-
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api } from "../../convex/_generated/api";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import ContentIdeasPanel from "../sidebar/ContentIdeasPanel";
 import StepIndicator from "./StepIndicator";
 import styles from "./chat.module.css";
-import type { Step } from "@/types";
+import type { Step } from "../../types";
 
 export default function ChatContainer() {
   const [conversationId, setConversationId] = useState<string | null>(null);
