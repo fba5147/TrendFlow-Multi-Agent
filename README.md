@@ -336,5 +336,3 @@ Plugins are the primary extension point. To contribute a new data source or gene
 4. Open a PR
 
 ---
-
-Created as part of a hiring evaluation. Not licensed for commercial use.
