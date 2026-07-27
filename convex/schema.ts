@@ -109,6 +109,55 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("conversationId", ["conversationId"]),
 
+  // Auth: OAuth users + roles
+  users: defineTable({
+    oauthProvider: v.string(), // "github" | "google"
+    oauthId: v.string(),
+    email: v.string(),
+    name: v.string(),
+    avatarUrl: v.optional(v.string()),
+    role: v.union(v.literal("admin"), v.literal("editor"), v.literal("viewer")),
+    createdAt: v.number(),
+    lastLoginAt: v.number(),
+  })
+    .index("by_oauth", ["oauthProvider", "oauthId"])
+    .index("by_email", ["email"]),
+
+  // Audit trail
+  audit_logs: defineTable({
+    userId: v.string(),
+    userEmail: v.string(),
+    action: v.string(),      // e.g. "agent.execute", "auth.login"
+    resource: v.string(),    // e.g. "agent", "auth"
+    resourceId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    ip: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    result: v.union(v.literal("success"), v.literal("failure")),
+    statusCode: v.number(),
+    durationMs: v.number(),
+    timestamp: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_timestamp", ["timestamp"]),
+
+  // LLM cost tracking
+  cost_events: defineTable({
+    userId: v.optional(v.string()),
+    conversationId: v.optional(v.string()),
+    provider: v.string(),
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    costUsd: v.number(),
+    durationMs: v.number(),
+    nodeType: v.optional(v.string()),
+    timestamp: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_conversation", ["conversationId"])
+    .index("by_timestamp", ["timestamp"]),
+
   // Research cache for prompt-based caching
   researchCache: defineTable({
     queryHash: v.string(), // Hash of normalized query + timeWindow + domain

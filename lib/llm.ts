@@ -1,4 +1,6 @@
 import { ChatGroq } from "@langchain/groq";
+import { recordCost, calculateCost } from "./observability/cost";
+import { logger } from "./observability/logger";
 
 export type LLMProvider = "groq" | "openai" | "anthropic" | "gemini" | "deepseek" | "ollama";
 
@@ -95,3 +97,61 @@ export function createLLM(provider?: string, model?: string, temperature = 0.7):
 }
 
 export const llm = createLLM();
+
+interface CostTrackingContext {
+  conversationId?: string;
+  userId?: string;
+  nodeType?: string;
+}
+
+/**
+ * Wraps createLLM() and intercepts invoke() to record token usage as cost events.
+ * Falls back silently if usage_metadata is absent (not all providers report tokens).
+ */
+export function createTrackedLLM(
+  provider?: string,
+  model?: string,
+  temperature = 0.7,
+  context: CostTrackingContext = {}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  const p = (provider || process.env.LLM_PROVIDER || "groq") as LLMProvider;
+  const m = model || process.env.LLM_MODEL || DEFAULT_MODELS[p];
+  const instance = createLLM(provider, model, temperature);
+  const originalInvoke = instance.invoke.bind(instance);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  instance.invoke = async (...args: any[]) => {
+    const start = Date.now();
+    const response = await originalInvoke(...args);
+    const durationMs = Date.now() - start;
+
+    try {
+      const usage =
+        response?.usage_metadata ??
+        response?.response_metadata?.tokenUsage ??
+        response?.response_metadata?.usage;
+      if (usage) {
+        const inputTokens = usage.input_tokens ?? usage.promptTokens ?? 0;
+        const outputTokens = usage.output_tokens ?? usage.completionTokens ?? 0;
+        if (inputTokens > 0 || outputTokens > 0) {
+          recordCost({
+            provider: p,
+            model: m,
+            inputTokens,
+            outputTokens,
+            costUsd: calculateCost(m, inputTokens, outputTokens),
+            durationMs,
+            ...context,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, "[cost] Failed to record LLM cost event");
+    }
+
+    return response;
+  };
+
+  return instance;
+}

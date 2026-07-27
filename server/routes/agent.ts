@@ -6,6 +6,10 @@ import { api } from "../../convex/_generated/api";
 import { AgentState, ContentIdea } from "../../lib/langgraph/state";
 import { MAIN_PLATFORMS, normalizePlatformName } from "../../utils";
 import type { Id } from "../../convex/_generated/dataModel";
+import { requireAuth } from "../middleware/auth";
+import { requireRole } from "../middleware/rbac";
+import { auditMiddleware } from "../middleware/audit";
+import { agentRateLimiter } from "../middleware/rateLimiter";
 
 export const agentRouter = Router();
 
@@ -16,11 +20,14 @@ if (!convexUrl) {
 
 const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
 
+// Apply auth + audit to all agent routes
+agentRouter.use(requireAuth, requireRole("editor"), auditMiddleware);
+
 /**
  * POST /api/agent/execute
  * Execute the LangGraph agent for a new conversation
  */
-agentRouter.post("/execute", async (req: Request, res: Response) => {
+agentRouter.post("/execute", agentRateLimiter, async (req: Request, res: Response) => {
   try {
     if (!convex) {
       return res.status(500).json({ error: "Convex not configured. Please set CONVEX_URL in .env" });

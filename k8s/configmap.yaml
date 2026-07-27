@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trendflow-config
+  namespace: default
+  labels:
+    app: trendflow
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  LOG_LEVEL: "info"
+  LLM_PROVIDER: "groq"
+  AUTH_ENABLED: "true"
+  OAUTH_CALLBACK_BASE_URL: "https://your-domain.com"
+  FRONTEND_URL: "https://your-domain.com"

@@ -172,3 +172,80 @@ export const getCachedResearch = query({
   },
 });
 
+// ---- Auth queries ----
+
+export const getUserByOAuth = query({
+  args: { oauthProvider: v.string(), oauthId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_oauth", (q) =>
+        q.eq("oauthProvider", args.oauthProvider).eq("oauthId", args.oauthId)
+      )
+      .first();
+  },
+});
+
+export const getUserByEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", args.email)).first();
+  },
+});
+
+export const listUsers = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const q = ctx.db.query("users").order("desc");
+    return args.limit ? await q.take(args.limit) : await q.collect();
+  },
+});
+
+// ---- Audit log queries ----
+
+export const getAuditLogs = query({
+  args: {
+    limit: v.optional(v.number()),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? 50, 500);
+    if (args.userId) {
+      return await ctx.db
+        .query("audit_logs")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId!))
+        .order("desc")
+        .take(limit);
+    }
+    return await ctx.db.query("audit_logs").withIndex("by_timestamp").order("desc").take(limit);
+  },
+});
+
+// ---- Cost queries ----
+
+export const getCostEvents = query({
+  args: {
+    limit: v.optional(v.number()),
+    userId: v.optional(v.string()),
+    conversationId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? 100, 1000);
+    if (args.conversationId) {
+      return await ctx.db
+        .query("cost_events")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId!))
+        .order("desc")
+        .take(limit);
+    }
+    if (args.userId) {
+      return await ctx.db
+        .query("cost_events")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId!))
+        .order("desc")
+        .take(limit);
+    }
+    return await ctx.db.query("cost_events").withIndex("by_timestamp").order("desc").take(limit);
+  },
+});
+

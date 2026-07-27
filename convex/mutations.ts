@@ -430,3 +430,107 @@ export const saveResearchCache = mutation({
   },
 });
 
+// ---- Auth: User upsert ----
+
+export const upsertUser = mutation({
+  args: {
+    oauthProvider: v.string(),
+    oauthId: v.string(),
+    email: v.string(),
+    name: v.string(),
+    avatarUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_oauth", (q) =>
+        q.eq("oauthProvider", args.oauthProvider).eq("oauthId", args.oauthId)
+      )
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        email: args.email,
+        name: args.name,
+        avatarUrl: args.avatarUrl,
+        lastLoginAt: now,
+      });
+      return { id: existing._id, email: args.email, name: args.name, role: existing.role };
+    }
+
+    // Check if this is the very first user → assign admin role
+    const userCount = await ctx.db.query("users").collect();
+    const role = userCount.length === 0 ? ("admin" as const) : ("editor" as const);
+
+    const id = await ctx.db.insert("users", {
+      oauthProvider: args.oauthProvider,
+      oauthId: args.oauthId,
+      email: args.email,
+      name: args.name,
+      avatarUrl: args.avatarUrl,
+      role,
+      createdAt: now,
+      lastLoginAt: now,
+    });
+    return { id, email: args.email, name: args.name, role };
+  },
+});
+
+export const updateUserRole = mutation({
+  args: {
+    userId: v.id("users"),
+    role: v.union(v.literal("admin"), v.literal("editor"), v.literal("viewer")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.userId, { role: args.role });
+  },
+});
+
+// ---- Audit log ----
+
+export const writeAuditLog = mutation({
+  args: {
+    userId: v.string(),
+    userEmail: v.string(),
+    action: v.string(),
+    resource: v.string(),
+    resourceId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    ip: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    result: v.union(v.literal("success"), v.literal("failure")),
+    statusCode: v.number(),
+    durationMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("audit_logs", { ...args, timestamp: Date.now() });
+  },
+});
+
+// ---- Cost events ----
+
+export const writeCostEvents = mutation({
+  args: {
+    events: v.array(
+      v.object({
+        userId: v.optional(v.string()),
+        conversationId: v.optional(v.string()),
+        provider: v.string(),
+        model: v.string(),
+        inputTokens: v.number(),
+        outputTokens: v.number(),
+        costUsd: v.number(),
+        durationMs: v.number(),
+        nodeType: v.optional(v.string()),
+        timestamp: v.number(),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    for (const event of args.events) {
+      await ctx.db.insert("cost_events", event);
+    }
+  },
+});
+
